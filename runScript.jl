@@ -256,7 +256,7 @@ end
 
 ## Serial MATVEC adapted for GPU implementation (GPU serial version 1)
 # Takes more per element memory
-function performMATVEC_version2( float_type, allnodes, loc2glb, uvals, nodebid, detJ, Jval, qnodes_per_element, 
+function performMATVEC_version1( float_type, allnodes, loc2glb, uvals, nodebid, detJ, Jval, qnodes_per_element, 
     nodes_per_element, Qr, Qs, Qt, wg )
 
     nnodes = size( allnodes, 2 );
@@ -345,7 +345,7 @@ end
 
 ## Serial MATVEC adapted for GPU implementation (GPU serial version 2)
 # Takes less per element memory 
-function performMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, detJ, J, qnodes_per_element, 
+function performMATVEC_version2( float_type, allnodes, loc2glb, uvals, nodebid, detJ, J, qnodes_per_element, 
     nodes_per_element, Qr, Qs, Qt, wg )
 
     nnodes = size( allnodes, 2 );
@@ -359,7 +359,6 @@ function performMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, 
         newUvals = zeros(float_type, nodes_per_element, 1);
 
         ## X Direction MATVEC Product
-
         uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
 
         for qp = 1:qnodes_per_element
@@ -378,8 +377,6 @@ function performMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, 
         end
 
         ## Y Direction MATVEC Product
-        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
-
         for qp = 1:qnodes_per_element
             for i = 1:nodes_per_element
 
@@ -396,8 +393,6 @@ function performMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, 
         end
 
         ## Z Direction MATVEC Product
-        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
-
         for qp = 1:qnodes_per_element
             for i = 1:nodes_per_element
 
@@ -426,6 +421,119 @@ function performMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, 
     return solutionVals;
 end
 
+
+## Serial MATVEC adapted for GPU implementation with fused loops (GPU serial version 3)
+# Takes less per element memory 
+function performMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, detJ, J, qnodes_per_element, 
+    nodes_per_element, Qr, Qs, Qt, wg )
+
+    nnodes = size( allnodes, 2 );
+    nElements = size( loc2glb, 2 );
+
+    uvalsLocal = zeros(float_type, nodes_per_element, 1);
+    solutionVals = zeros( float_type, nnodes, 1 );
+
+    for eid = 1:nElements
+
+        newUvals = zeros(float_type, nodes_per_element, 1);
+
+        ## All directions MATVEC Product in one loop
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        for qp = 1:qnodes_per_element
+            for i = 1:nodes_per_element
+
+                phigradx_qi = Qr[ qp, i ] * J[eid].rx[ qp ] + Qs[ qp, i ] * J[eid].sx[ qp ] + Qt[ qp, i ] * J[eid].tx[ qp ]; 
+                phigrady_qi = Qr[ qp, i ] * J[eid].ry[ qp ] + Qs[ qp, i ] * J[eid].sy[ qp ] + Qt[ qp, i ] * J[eid].ty[ qp ]; 
+                phigradz_qi = Qr[ qp, i ] * J[eid].rz[ qp ] + Qs[ qp, i ] * J[eid].sz[ qp ] + Qt[ qp, i ] * J[eid].tz[ qp ]; 
+
+                ux_qp = 0;
+                uy_qp = 0;
+                uz_qp = 0;
+
+                for j = 1:nodes_per_element
+
+                    phigradx_qj = Qr[ qp, j ] * J[eid].rx[ qp ] + Qs[ qp, j ] * J[eid].sx[ qp ] + Qt[ qp, j ] * J[eid].tx[ qp ]; 
+                    phigrady_qj = Qr[ qp, j ] * J[eid].ry[ qp ] + Qs[ qp, j ] * J[eid].sy[ qp ] + Qt[ qp, j ] * J[eid].ty[ qp ]; 
+                    phigradz_qj = Qr[ qp, j ] * J[eid].rz[ qp ] + Qs[ qp, j ] * J[eid].sz[ qp ] + Qt[ qp, j ] * J[eid].tz[ qp ]; 
+
+                    ux_qp = ux_qp + uvalsLocal[ j ] * phigradx_qj * detJ[ qp, eid ] * wg[ qp ];
+                    uy_qp = uy_qp + uvalsLocal[ j ] * phigrady_qj * detJ[ qp, eid ] * wg[ qp ];
+                    uz_qp = uz_qp + uvalsLocal[ j ] * phigradz_qj * detJ[ qp, eid ] * wg[ qp ];
+
+                end
+
+                newUvals[i] = newUvals[i] + phigradx_qi * ux_qp + phigrady_qi * uy_qp + phigradz_qi * uz_qp;
+            end
+        end
+
+        for localNodeId = 1:nodes_per_element
+
+            globalNodeId = loc2glb[ localNodeId, eid ];
+
+            if( nodebid[ globalNodeId ] == 0 )
+                solutionVals[ globalNodeId ] = solutionVals[ globalNodeId ] .+ newUvals[ localNodeId ];
+            end
+        end
+    end
+
+    return solutionVals;
+end
+
+## GPU MATVEC implementation with fused loops (GPU version 3)
+# Takes less per thread memory but very slightly more without fused loops 
+function performGPUMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, nnodes, nElements, detJ, J,
+    qnodes_per_element, nodes_per_element, Qr, Qs, Qt, wg )
+
+    uvalsLocal = zeros(float_type, nodes_per_element, 1);
+    solutionVals = zeros( float_type, nnodes, 1 );
+
+    for eid = 1:nElements
+
+        newUvals = zeros(float_type, nodes_per_element, 1);
+
+        ## All directions MATVEC Product in one loop
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        for qp = 1:qnodes_per_element
+            for i = 1:nodes_per_element
+
+                phigradx_qi = Qr[ qp, i ] * J[eid].rx[ qp ] + Qs[ qp, i ] * J[eid].sx[ qp ] + Qt[ qp, i ] * J[eid].tx[ qp ]; 
+                phigrady_qi = Qr[ qp, i ] * J[eid].ry[ qp ] + Qs[ qp, i ] * J[eid].sy[ qp ] + Qt[ qp, i ] * J[eid].ty[ qp ]; 
+                phigradz_qi = Qr[ qp, i ] * J[eid].rz[ qp ] + Qs[ qp, i ] * J[eid].sz[ qp ] + Qt[ qp, i ] * J[eid].tz[ qp ]; 
+
+                ux_qp = 0;
+                uy_qp = 0;
+                uz_qp = 0;
+
+                for j = 1:nodes_per_element
+
+                    phigradx_qj = Qr[ qp, j ] * J[eid].rx[ qp ] + Qs[ qp, j ] * J[eid].sx[ qp ] + Qt[ qp, j ] * J[eid].tx[ qp ]; 
+                    phigrady_qj = Qr[ qp, j ] * J[eid].ry[ qp ] + Qs[ qp, j ] * J[eid].sy[ qp ] + Qt[ qp, j ] * J[eid].ty[ qp ]; 
+                    phigradz_qj = Qr[ qp, j ] * J[eid].rz[ qp ] + Qs[ qp, j ] * J[eid].sz[ qp ] + Qt[ qp, j ] * J[eid].tz[ qp ]; 
+
+                    ux_qp = ux_qp + uvalsLocal[ j ] * phigradx_qj * detJ[ qp, eid ] * wg[ qp ];
+                    uy_qp = uy_qp + uvalsLocal[ j ] * phigrady_qj * detJ[ qp, eid ] * wg[ qp ];
+                    uz_qp = uz_qp + uvalsLocal[ j ] * phigradz_qj * detJ[ qp, eid ] * wg[ qp ];
+
+                end
+
+                newUvals[i] = newUvals[i] + phigradx_qi * ux_qp + phigrady_qi * uy_qp + phigradz_qi * uz_qp;
+            end
+        end
+
+        for localNodeId = 1:nodes_per_element
+
+            globalNodeId = loc2glb[ localNodeId, eid ];
+
+            if( nodebid[ globalNodeId ] == 0 )
+                solutionVals[ globalNodeId ] = solutionVals[ globalNodeId ] .+ newUvals[ localNodeId ];
+            end
+        end
+    end
+
+    return solutionVals;
+end
 
 function getRHS( configObj, geoFacs, refelVal, gridDataVal, fvalsNodal, fvalsRHS  )
 
@@ -463,6 +571,41 @@ function getRHS( configObj, geoFacs, refelVal, gridDataVal, fvalsNodal, fvalsRHS
     end
 end
 
+function testFullComputation( A, fValsRHS  )
+
+    U = gmres( A, fValsRHS; reltol = 1e-14, verbose = true )
+
+    return U;
+
+end
+
+function getParameters( configObj, fileVal )
+
+    meshDataVal = read_mesh( fileVal );
+    global refelVal, gridDataVal = grid_from_mesh( meshDataVal, configObj );
+    nnodes = size( gridDataVal.allnodes, 2 );
+
+    global geoFacs = build_geometric_factors( configObj, refelVal, gridDataVal, do_face_detj = false, 
+        do_vol_area = false, constant_jacobian = false );
+
+    uvals = zeros( configObj.float_type, nnodes, 1 );
+    rhsNodeVals = zeros( configObj.float_type, nnodes, 1 );
+    exactvals = zeros( configObj.float_type, nnodes, 1 );
+
+    for nodeId = 1:nnodes
+
+        nodeCoords = gridDataVal.allnodes[ :, nodeId ];
+        uvals[ nodeId, 1 ] = initFunction( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
+        rhsNodeVals[ nodeId, 1 ] = rhsNodalFunction( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
+        exactvals[ nodeId, 1 ] = exactSol( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
+    end
+
+    global fValsRHS = zeros( configObj.float_type, nnodes, 1 );
+    getRHS( configObj, geoFacs, refelVal, gridDataVal, rhsNodeVals, fValsRHS  );
+
+    return [ gridDataVal, refelVal, geoFacs, exactvals, fValsRHS ]
+end
+
 function checkConvergence( gmshFolderName, configObj )
 
     meshvals = readdir( gmshFolderName, join = true )
@@ -484,50 +627,22 @@ function checkConvergence( gmshFolderName, configObj )
         end
 
         fileVal = open( meshval, "r" );
-
         println(meshval)
-        meshDataVal = read_mesh( fileVal );
 
-        global refelVal, gridDataVal = grid_from_mesh( meshDataVal, configObj );
-
+        gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
         nnodes = size( gridDataVal.allnodes, 2 );
+
         numNodeVals[index] = nnodes;
-
-        uvals = zeros( configObj.float_type, nnodes, 1 );
-        rhsNodeVals = zeros( configObj.float_type, nnodes, 1 );
-        exactvals = zeros( configObj.float_type, nnodes, 1 );
-
-        for nodeId = 1:nnodes
-
-            nodeCoords = gridDataVal.allnodes[ :, nodeId ];
-            uvals[ nodeId, 1 ] = initFunction( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
-            rhsNodeVals[ nodeId, 1 ] = rhsNodalFunction( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
-            exactvals[ nodeId, 1 ] = exactSol( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
-        end
-
-        global geoFacs = build_geometric_factors( configObj, refelVal, gridDataVal, do_face_detj = false, 
-            do_vol_area = false, constant_jacobian = false );
-
-        global fValsRHS = zeros( configObj.float_type, nnodes, 1 );
-        getRHS( configObj, geoFacs, refelVal, gridDataVal, rhsNodeVals, fValsRHS  );
-        
         A = SizedStrangMatrix((length( fValsRHS ),length( fValsRHS ) ) );
+        U = testFullComputation( A, fValsRHS );
         
-        matVals, globalVec = createGlobalMatrix([0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
-
-        U = gmres( A, fValsRHS; reltol = 1e-14, verbose = true )
-
         ### Residual Error test
         @test isapprox( A* U, fValsRHS, atol = 1e-6 )
 
-        ### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
-        solutionValuesMATVEC = performMATVEC( configObj, geoFacs, refelVal, gridDataVal, fValsRHS );
-        solutionValuesMatMul = matVals * fValsRHS;
-        @test isapprox( solutionValuesMatMul, solutionValuesMATVEC, atol = 1e-6 )
-
         ### Solution Error to check correct solution and convergence
         solutionErrorVec = U - exactvals;
-        solutionErrorL2 = norm( solutionErrorVec / nnodes, 2 );
+        solutionErrorL2 = norm( solutionErrorVec, 2 );
+        solutionErrorL2 = sqrt( (solutionErrorL2 ^ 2 ) / nnodes );
         solutionErrorLinf = norm( solutionErrorVec, Inf );
 
         errorValsL2[index] = solutionErrorL2;
@@ -547,6 +662,22 @@ function checkConvergence( gmshFolderName, configObj )
     loglog( numNodeVals, hVals[:], label = L"h^2" )
     legend()
     
+end
+
+function testMATVEC( fileVal, configObj )
+
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    
+    matVals, globalVec = createGlobalMatrix([0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
+
+    ### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
+    solutionValuesMATVEC = performMATVEC_version3( configObj.float_type, gridDataVal.allnodes, gridDataVal.loc2glb, fValsRHS,
+    gridDataVal.nodebid, geoFacs.detJ, geoFacs.J, refelVal.Nqp, refelVal.Np, 
+    refelVal.Qr, refelVal.Qs, refelVal.Qt, refelVal.wg );
+    
+    solutionValuesMatMul = matVals * fValsRHS;
+    @test isapprox( solutionValuesMatMul, solutionValuesMATVEC, atol = 1e-6 )
+
 end
 
 struct SizedStrangMatrix
@@ -569,4 +700,8 @@ end
 
 LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) ), A, B);        
 
-checkConvergence( gmshFolderName, configObj )
+# checkConvergence( gmshFolderName, configObj )
+
+gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
+fileVal = open( gmshFileName )
+testMATVEC( fileVal, configObj )

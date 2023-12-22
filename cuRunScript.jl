@@ -3,6 +3,9 @@ using CUDA
 using BenchmarkTools
 
 function sequential_add!(y, x)
+
+    val1 = size(y)
+
     for i in eachindex(y, x)
         @inbounds y[i] += x[i]
     end
@@ -10,6 +13,7 @@ function sequential_add!(y, x)
 end
 
 function parallel_add!(y, x)
+
     Threads.@threads for i in eachindex(y, x)
         @inbounds y[i] += x[i]
     end
@@ -17,6 +21,7 @@ function parallel_add!(y, x)
 end
 
 function gpu_add1!(y, x)
+
     for i = 1:length(y)
         @inbounds y[i] += x[i]
     end
@@ -51,6 +56,8 @@ function gpu_add4!(y, x)
 end
 
 function gpu_add5!(y, x)
+
+    val1 = size(y, 1)
     index = (blockIdx().x - Int32(1)) * blockDim().x + threadIdx().x
     stride = gridDim().x * blockDim().x
 
@@ -131,8 +138,8 @@ x_d = CUDA.fill(1.0f0, N)  # a vector stored on the GPU filled with 1.0
 # CUDA.@profile bench_gpu1!(y_d, x_d)
 # CUDA.@profile bench_gpu3!(y_d, x_d)
 # CUDA.@profile bench_gpu1!(y_d, x_d)
-CUDA.@profile bench_gpu4!(y_d, x_d)
-@test all(Array(y_d) .== 3.0f0)
+# CUDA.@profile bench_gpu4!(y_d, x_d)
+# @test all(Array(y_d) .== 3.0f0)
 
 y_d = CUDA.fill(2.0f0, N)  # a vector stored on the GPU filled with 2.0
 CUDA.@profile bench_gpu5!(y_d, x_d)
