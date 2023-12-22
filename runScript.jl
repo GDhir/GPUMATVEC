@@ -15,8 +15,9 @@ using PyPlot
 using LaTeXStrings
 using CUDA
 using Adapt
+using StaticArrays
 
-globalFloatType = Float64;
+globalFloatType = Float32;
 
 function initFunction(x::Union{FT,FT},y::Union{FT,FT},z::Union{FT,FT}) where FT<:AbstractFloat
     return 1.0; 
@@ -484,51 +485,47 @@ end
 
 ## GPU MATVEC implementation with fused loops (GPU version 3)
 # Takes less per thread memory but very slightly more without fused loops 
-function performGPUMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, nnodes, nElements, detJ, J,
-    qnodes_per_element, nodes_per_element, Qr, Qs, Qt, wg, solutionVals )
+function performGPUMATVEC_version3( allnodes, loc2glb, uvals, nodebid, nnodes, nElements, detJ, 
+    rx, ry, rz, sx, sy, sz, tx, ty, tz, qnodes_per_element, nodes_per_element, Qr, Qs, 
+    Qt, wg, solutionVals )
 
-    uvalsLocal = @SVector zeros(float_type, nodes_per_element);
-
-    eid = (blockIdx().x - 1) * blockDim().x + threadIdx().x
-
-    newUvals = @SVector zeros(float_type, nodes_per_element);
-
+    eid = (blockIdx().x - 1) * blockDim().x + threadIdx().x;
     ## All directions MATVEC Product in one loop
-    uvalsLocal[:] = uvals[ loc2glb[ :, eid ] ];
 
-    for qp = 1:qnodes_per_element
-        for i = 1:nodes_per_element
+    if (eid <= nElements)
+        for qp = 1:qnodes_per_element
+            for i = 1:nodes_per_element
 
-            phigradx_qi = Qr[ qp, i ] * J[eid].rx[ qp ] + Qs[ qp, i ] * J[eid].sx[ qp ] + Qt[ qp, i ] * J[eid].tx[ qp ]; 
-            phigrady_qi = Qr[ qp, i ] * J[eid].ry[ qp ] + Qs[ qp, i ] * J[eid].sy[ qp ] + Qt[ qp, i ] * J[eid].ty[ qp ]; 
-            phigradz_qi = Qr[ qp, i ] * J[eid].rz[ qp ] + Qs[ qp, i ] * J[eid].sz[ qp ] + Qt[ qp, i ] * J[eid].tz[ qp ]; 
+                @inbounds globalNodeId_i = loc2glb[ i, eid ];
 
-            ux_qp = 0;
-            uy_qp = 0;
-            uz_qp = 0;
+                if( nodebid[ globalNodeId_i ] == 0 )
 
-            for j = 1:nodes_per_element
+                    @inbounds phigradx_qi = Qr[ qp, i ] * rx[ qp, eid ] + Qs[ qp, i ] * sx[ qp, eid ] + Qt[ qp, i ] * tx[ qp, eid ]; 
+                    phigrady_qi = Qr[ qp, i ] * ry[ qp, eid ] + Qs[ qp, i ] * sy[ qp, eid ] + Qt[ qp, i ] * ty[ qp, eid ]; 
+                    phigradz_qi = Qr[ qp, i ] * rz[ qp, eid ] + Qs[ qp, i ] * sz[ qp, eid ] + Qt[ qp, i ] * tz[ qp, eid ]; 
 
-                phigradx_qj = Qr[ qp, j ] * J[eid].rx[ qp ] + Qs[ qp, j ] * J[eid].sx[ qp ] + Qt[ qp, j ] * J[eid].tx[ qp ]; 
-                phigrady_qj = Qr[ qp, j ] * J[eid].ry[ qp ] + Qs[ qp, j ] * J[eid].sy[ qp ] + Qt[ qp, j ] * J[eid].ty[ qp ]; 
-                phigradz_qj = Qr[ qp, j ] * J[eid].rz[ qp ] + Qs[ qp, j ] * J[eid].sz[ qp ] + Qt[ qp, j ] * J[eid].tz[ qp ]; 
+                    ux_qp = 0;
+                    uy_qp = 0;
+                    uz_qp = 0;
 
-                ux_qp = ux_qp + uvalsLocal[ j ] * phigradx_qj * detJ[ qp, eid ] * wg[ qp ];
-                uy_qp = uy_qp + uvalsLocal[ j ] * phigrady_qj * detJ[ qp, eid ] * wg[ qp ];
-                uz_qp = uz_qp + uvalsLocal[ j ] * phigradz_qj * detJ[ qp, eid ] * wg[ qp ];
+                    for j = 1:nodes_per_element
 
+                        globalNodeId_j = loc2glb[ j, eid ];
+
+                        phigradx_qj = Qr[ qp, j ] * rx[ qp, eid ] + Qs[ qp, j ] * sx[ qp, eid ] + Qt[ qp, j ] * tx[ qp, eid ]; 
+                        phigrady_qj = Qr[ qp, j ] * ry[ qp, eid ] + Qs[ qp, j ] * sy[ qp, eid ] + Qt[ qp, j ] * ty[ qp, eid ]; 
+                        phigradz_qj = Qr[ qp, j ] * rz[ qp, eid ] + Qs[ qp, j ] * sz[ qp, eid ] + Qt[ qp, j ] * tz[ qp, eid ]; 
+
+                        ux_qp = ux_qp + uvals[ globalNodeId_j ] * phigradx_qj * detJ[ qp, eid ] * wg[ qp ];
+                        uy_qp = uy_qp + uvals[ globalNodeId_j ] * phigrady_qj * detJ[ qp, eid ] * wg[ qp ];
+                        uz_qp = uz_qp + uvals[ globalNodeId_j ] * phigradz_qj * detJ[ qp, eid ] * wg[ qp ];
+
+                    end
+
+                    CUDA.@atomic solutionVals[ globalNodeId_i ] = solutionVals[ globalNodeId_i ] +
+                        phigradx_qi * ux_qp + phigrady_qi * uy_qp + phigradz_qi * uz_qp;
+                end
             end
-
-            newUvals[i] = newUvals[i] + phigradx_qi * ux_qp + phigrady_qi * uy_qp + phigradz_qi * uz_qp;
-        end
-    end
-
-    for localNodeId = 1:nodes_per_element
-
-        globalNodeId = loc2glb[ localNodeId, eid ];
-
-        if( nodebid[ globalNodeId ] == 0 )
-            solutionVals[ globalNodeId ] = solutionVals[ globalNodeId ] .+ newUvals[ localNodeId ];
         end
     end
 
@@ -684,34 +681,77 @@ function testGPUMATVEC( fileVal, configObj )
 
     gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
     
-    matVals, globalVec = createGlobalMatrix([0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
+    matVals, globalVec = createGlobalMatrix(Float32[0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
 
     allnodes_d = CuArray( gridDataVal.allnodes )
     loc2glb_d = CuArray( gridDataVal.loc2glb )
-    fvalsRHS_d = CuArray( fValsRHS )
+    fValsRHS_d = CuArray( fValsRHS )
     nodebid_d = CuArray( gridDataVal.nodebid )
     detJ_d = CuArray( geoFacs.detJ )
 
     nnodes = size( gridDataVal.allnodes, 2 );
     nElements = size( gridDataVal.loc2glb, 2 );
+    qnodes_per_element = size( refelVal.Qr, 1 )
 
-    J_d = JacobianDevice( configObj.float_type, geoFacs.J )
+    rx = zeros( qnodes_per_element, nElements );
+    ry = zeros( qnodes_per_element, nElements );
+    rz = zeros( qnodes_per_element, nElements );
+    tx = zeros( qnodes_per_element, nElements );
+    ty = zeros( qnodes_per_element, nElements );
+    tz = zeros( qnodes_per_element, nElements );
+    sx = zeros( qnodes_per_element, nElements );
+    sy = zeros( qnodes_per_element, nElements );
+    sz = zeros( qnodes_per_element, nElements );
+
+    for eid = 1:nElements
+
+        rx[ :, eid ] = geoFacs.J[eid].rx[:];
+        rx[ :, eid ] = geoFacs.J[eid].rx[:];
+        rx[ :, eid ] = geoFacs.J[eid].rx[:];
+        sx[ :, eid ] = geoFacs.J[eid].sx[:];
+        sy[ :, eid ] = geoFacs.J[eid].sy[:];
+        sz[ :, eid ] = geoFacs.J[eid].sz[:];
+        tx[ :, eid ] = geoFacs.J[eid].tx[:];
+        ty[ :, eid ] = geoFacs.J[eid].ty[:];
+        tz[ :, eid ] = geoFacs.J[eid].tz[:];
+
+    end
+
+    rx_d = CuArray( rx );
+    ry_d = CuArray( ry );
+    rz_d = CuArray( rz );
+    tx_d = CuArray( tx );
+    ty_d = CuArray( ty );
+    tz_d = CuArray( tz );
+    sx_d = CuArray( sx );
+    sy_d = CuArray( sy );
+    sz_d = CuArray( sz );
+
     Qr_d = CuArray( refelVal.Qr )
     Qs_d = CuArray( refelVal.Qs )
     Qt_d = CuArray( refelVal.Qt )
     wg_d = CuArray( refelVal.wg )
 
-    solutionValuesMATVEC = CuArray( zeros( float_type, nnodes, 1 ) );
+    solutionValuesMATVEC = CuArray( zeros( configObj.float_type, nnodes ) );
 
     numthreads = 256
     numblocks = ceil(Int, nElements / numthreads )
 
-    @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version3( configObj.float_type, allnodes_d, loc2glb_d, fValsRHS_d, 
-    nodebid_d, nnodes, nElements, detJ_d, J_d, refelVal.Nqp, refelVal.Np, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC );
+    CUDA.@sync begin
+        @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version3( allnodes_d, loc2glb_d, fValsRHS_d, 
+        nodebid_d, nnodes, nElements, detJ_d, rx_d, ry_d, rz_d, sx_d, sy_d, sz_d, tx_d, ty_d, tz_d, refelVal.Nqp, refelVal.Np,
+        Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC );
+    end
     
     ### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
     solutionValuesMatMul = matVals * fValsRHS;
-    @test isapprox( solutionValuesMatMul, solutionValuesMATVEC, atol = 1e-6 )
+
+    cpuSolutionValues = Array( solutionValuesMATVEC );
+    
+    println( norm( solutionValuesMatMul - cpuSolutionValues ) )
+    @test isapprox( solutionValuesMatMul, cpuSolutionValues, atol = 1e-6 )
+
+    
 
 end
 
@@ -738,6 +778,6 @@ LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) 
 # checkConvergence( gmshFolderName, configObj )
 Adapt.@adapt_structure JacobianDevice
 
-gmshFileName = gmshFolderName * "regularMesh3D_lvl3.msh";
+gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
 fileVal = open( gmshFileName )
-testMATVEC( fileVal, configObj )
+testGPUMATVEC( fileVal, configObj )

@@ -1,5 +1,6 @@
 export Refel, GeometricFactors, MeshData, Grid, Jacobian
 include("mesh_data.jl")
+using CUDA 
 
 mutable struct Refel{T<:AbstractFloat}
     dim::Int                # Dimension
@@ -121,19 +122,20 @@ struct Jacobian{T<:AbstractFloat}
     tz::Vector{T}
 end
 
-struct JacobianDevice{T<:AbstractFloat}
-    rx_d::CuArray{T}
-    ry_d::CuArray{T}
-    rz_d::CuArray{T}
-    sx_d::CuArray{T}
-    sy_d::CuArray{T}
-    sz_d::CuArray{T}
-    tx_d::CuArray{T}
-    ty_d::CuArray{T}
-    tz_d::CuArray{T}
+struct JacobianDevice
+    rx_d::CuArray
+    ry_d::CuArray
+    rz_d::CuArray
+    sx_d::CuArray
+    sy_d::CuArray
+    sz_d::CuArray
+    tx_d::CuArray
+    ty_d::CuArray
+    tz_d::CuArray
 
-    JacobianDevice( T::DataType, J::Jacobian ) = ( new{T}( CuArray( J.rx ), CuArray( J.ry ), CuArray( J.rz ), CuArray( J.sx ),
-             CuArray( J.sy ), CuArray( J.sz ), CuArray( J.tx ), CuArray( J.ty ), CuArray( J.tz ) );
+    JacobianDevice( rx, ry, rz, sx, sy, sz, tx, ty, tz ) = 
+    ( new( CuArray( rx ), CuArray( ry ), CuArray( rz ), CuArray( sx ), CuArray( sy ), CuArray( sz ), 
+        CuArray( tx ), CuArray( ty ), CuArray( tz ) );
     )
 end
 
@@ -389,7 +391,7 @@ mutable struct FinchConfig
         METIS,
         
         Int64,
-        Float64,
+        Float32,
         
         false
     );
