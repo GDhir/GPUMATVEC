@@ -13,6 +13,8 @@ using IterativeSolvers
 using Test
 using PyPlot
 using LaTeXStrings
+using CUDA
+using Adapt
 
 globalFloatType = Float64;
 
@@ -483,56 +485,54 @@ end
 ## GPU MATVEC implementation with fused loops (GPU version 3)
 # Takes less per thread memory but very slightly more without fused loops 
 function performGPUMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, nnodes, nElements, detJ, J,
-    qnodes_per_element, nodes_per_element, Qr, Qs, Qt, wg )
+    qnodes_per_element, nodes_per_element, Qr, Qs, Qt, wg, solutionVals )
 
-    uvalsLocal = zeros(float_type, nodes_per_element, 1);
-    solutionVals = zeros( float_type, nnodes, 1 );
+    uvalsLocal = @SVector zeros(float_type, nodes_per_element);
 
-    for eid = 1:nElements
+    eid = (blockIdx().x - 1) * blockDim().x + threadIdx().x
 
-        newUvals = zeros(float_type, nodes_per_element, 1);
+    newUvals = @SVector zeros(float_type, nodes_per_element);
 
-        ## All directions MATVEC Product in one loop
-        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+    ## All directions MATVEC Product in one loop
+    uvalsLocal[:] = uvals[ loc2glb[ :, eid ] ];
 
-        for qp = 1:qnodes_per_element
-            for i = 1:nodes_per_element
+    for qp = 1:qnodes_per_element
+        for i = 1:nodes_per_element
 
-                phigradx_qi = Qr[ qp, i ] * J[eid].rx[ qp ] + Qs[ qp, i ] * J[eid].sx[ qp ] + Qt[ qp, i ] * J[eid].tx[ qp ]; 
-                phigrady_qi = Qr[ qp, i ] * J[eid].ry[ qp ] + Qs[ qp, i ] * J[eid].sy[ qp ] + Qt[ qp, i ] * J[eid].ty[ qp ]; 
-                phigradz_qi = Qr[ qp, i ] * J[eid].rz[ qp ] + Qs[ qp, i ] * J[eid].sz[ qp ] + Qt[ qp, i ] * J[eid].tz[ qp ]; 
+            phigradx_qi = Qr[ qp, i ] * J[eid].rx[ qp ] + Qs[ qp, i ] * J[eid].sx[ qp ] + Qt[ qp, i ] * J[eid].tx[ qp ]; 
+            phigrady_qi = Qr[ qp, i ] * J[eid].ry[ qp ] + Qs[ qp, i ] * J[eid].sy[ qp ] + Qt[ qp, i ] * J[eid].ty[ qp ]; 
+            phigradz_qi = Qr[ qp, i ] * J[eid].rz[ qp ] + Qs[ qp, i ] * J[eid].sz[ qp ] + Qt[ qp, i ] * J[eid].tz[ qp ]; 
 
-                ux_qp = 0;
-                uy_qp = 0;
-                uz_qp = 0;
+            ux_qp = 0;
+            uy_qp = 0;
+            uz_qp = 0;
 
-                for j = 1:nodes_per_element
+            for j = 1:nodes_per_element
 
-                    phigradx_qj = Qr[ qp, j ] * J[eid].rx[ qp ] + Qs[ qp, j ] * J[eid].sx[ qp ] + Qt[ qp, j ] * J[eid].tx[ qp ]; 
-                    phigrady_qj = Qr[ qp, j ] * J[eid].ry[ qp ] + Qs[ qp, j ] * J[eid].sy[ qp ] + Qt[ qp, j ] * J[eid].ty[ qp ]; 
-                    phigradz_qj = Qr[ qp, j ] * J[eid].rz[ qp ] + Qs[ qp, j ] * J[eid].sz[ qp ] + Qt[ qp, j ] * J[eid].tz[ qp ]; 
+                phigradx_qj = Qr[ qp, j ] * J[eid].rx[ qp ] + Qs[ qp, j ] * J[eid].sx[ qp ] + Qt[ qp, j ] * J[eid].tx[ qp ]; 
+                phigrady_qj = Qr[ qp, j ] * J[eid].ry[ qp ] + Qs[ qp, j ] * J[eid].sy[ qp ] + Qt[ qp, j ] * J[eid].ty[ qp ]; 
+                phigradz_qj = Qr[ qp, j ] * J[eid].rz[ qp ] + Qs[ qp, j ] * J[eid].sz[ qp ] + Qt[ qp, j ] * J[eid].tz[ qp ]; 
 
-                    ux_qp = ux_qp + uvalsLocal[ j ] * phigradx_qj * detJ[ qp, eid ] * wg[ qp ];
-                    uy_qp = uy_qp + uvalsLocal[ j ] * phigrady_qj * detJ[ qp, eid ] * wg[ qp ];
-                    uz_qp = uz_qp + uvalsLocal[ j ] * phigradz_qj * detJ[ qp, eid ] * wg[ qp ];
+                ux_qp = ux_qp + uvalsLocal[ j ] * phigradx_qj * detJ[ qp, eid ] * wg[ qp ];
+                uy_qp = uy_qp + uvalsLocal[ j ] * phigrady_qj * detJ[ qp, eid ] * wg[ qp ];
+                uz_qp = uz_qp + uvalsLocal[ j ] * phigradz_qj * detJ[ qp, eid ] * wg[ qp ];
 
-                end
-
-                newUvals[i] = newUvals[i] + phigradx_qi * ux_qp + phigrady_qi * uy_qp + phigradz_qi * uz_qp;
             end
-        end
 
-        for localNodeId = 1:nodes_per_element
-
-            globalNodeId = loc2glb[ localNodeId, eid ];
-
-            if( nodebid[ globalNodeId ] == 0 )
-                solutionVals[ globalNodeId ] = solutionVals[ globalNodeId ] .+ newUvals[ localNodeId ];
-            end
+            newUvals[i] = newUvals[i] + phigradx_qi * ux_qp + phigrady_qi * uy_qp + phigradz_qi * uz_qp;
         end
     end
 
-    return solutionVals;
+    for localNodeId = 1:nodes_per_element
+
+        globalNodeId = loc2glb[ localNodeId, eid ];
+
+        if( nodebid[ globalNodeId ] == 0 )
+            solutionVals[ globalNodeId ] = solutionVals[ globalNodeId ] .+ newUvals[ localNodeId ];
+        end
+    end
+
+    return nothing;
 end
 
 function getRHS( configObj, geoFacs, refelVal, gridDataVal, fvalsNodal, fvalsRHS  )
@@ -680,6 +680,41 @@ function testMATVEC( fileVal, configObj )
 
 end
 
+function testGPUMATVEC( fileVal, configObj )
+
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    
+    matVals, globalVec = createGlobalMatrix([0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
+
+    allnodes_d = CuArray( gridDataVal.allnodes )
+    loc2glb_d = CuArray( gridDataVal.loc2glb )
+    fvalsRHS_d = CuArray( fValsRHS )
+    nodebid_d = CuArray( gridDataVal.nodebid )
+    detJ_d = CuArray( geoFacs.detJ )
+
+    nnodes = size( gridDataVal.allnodes, 2 );
+    nElements = size( gridDataVal.loc2glb, 2 );
+
+    J_d = JacobianDevice( configObj.float_type, geoFacs.J )
+    Qr_d = CuArray( refelVal.Qr )
+    Qs_d = CuArray( refelVal.Qs )
+    Qt_d = CuArray( refelVal.Qt )
+    wg_d = CuArray( refelVal.wg )
+
+    solutionValuesMATVEC = CuArray( zeros( float_type, nnodes, 1 ) );
+
+    numthreads = 256
+    numblocks = ceil(Int, nElements / numthreads )
+
+    @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version3( configObj.float_type, allnodes_d, loc2glb_d, fValsRHS_d, 
+    nodebid_d, nnodes, nElements, detJ_d, J_d, refelVal.Nqp, refelVal.Np, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC );
+    
+    ### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
+    solutionValuesMatMul = matVals * fValsRHS;
+    @test isapprox( solutionValuesMatMul, solutionValuesMATVEC, atol = 1e-6 )
+
+end
+
 struct SizedStrangMatrix
     size::Tuple{Int,Int}
 end
@@ -701,7 +736,8 @@ end
 LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) ), A, B);        
 
 # checkConvergence( gmshFolderName, configObj )
+Adapt.@adapt_structure JacobianDevice
 
-gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
+gmshFileName = gmshFolderName * "regularMesh3D_lvl3.msh";
 fileVal = open( gmshFileName )
 testMATVEC( fileVal, configObj )

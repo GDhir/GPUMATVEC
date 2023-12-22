@@ -121,6 +121,22 @@ struct Jacobian{T<:AbstractFloat}
     tz::Vector{T}
 end
 
+struct JacobianDevice{T<:AbstractFloat}
+    rx_d::CuArray{T}
+    ry_d::CuArray{T}
+    rz_d::CuArray{T}
+    sx_d::CuArray{T}
+    sy_d::CuArray{T}
+    sz_d::CuArray{T}
+    tx_d::CuArray{T}
+    ty_d::CuArray{T}
+    tz_d::CuArray{T}
+
+    JacobianDevice( T::DataType, J::Jacobian ) = ( new{T}( CuArray( J.rx ), CuArray( J.ry ), CuArray( J.rz ), CuArray( J.sx ),
+             CuArray( J.sy ), CuArray( J.sz ), CuArray( J.tx ), CuArray( J.ty ), CuArray( J.tz ) );
+    )
+end
+
 struct GeometricFactors{T<:AbstractFloat}
     J::Vector{Jacobian{T}}        # Jacobian for each element
     detJ::Matrix{T}      # Determinant of Jacobian for each element
