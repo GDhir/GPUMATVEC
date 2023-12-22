@@ -10,16 +10,21 @@ using LinearAlgebra
 import LinearAlgebra: mul!
 using SparseArrays
 using IterativeSolvers
+using Test
+using PyPlot
+using LaTeXStrings
 
-function initFunction(x::Union{Float64,Float64},y::Union{Float64,Float64},z::Union{Float64,Float64})    
+globalFloatType = Float64;
+
+function initFunction(x::Union{FT,FT},y::Union{FT,FT},z::Union{FT,FT}) where FT<:AbstractFloat
     return 1.0; 
 end
 
-function exactSol(x::Union{Float64,Float64},y::Union{Float64,Float64},z::Union{Float64,Float64})    
+function exactSol(x::Union{FT,FT},y::Union{FT,FT},z::Union{FT,FT}) where FT<:AbstractFloat   
     return (sin(pi*x*1)*sin(pi*y*1)*sin(pi*z*1));
 end
 
-function rhsNodalFunction(x::Union{Float64,Float64},y::Union{Float64,Float64},z::Union{Float64,Float64})    
+function rhsNodalFunction(x::Union{FT,FT},y::Union{FT,FT},z::Union{FT,FT}) where FT<:AbstractFloat   
     return (3 * (pi ^ 2) * sin( pi * x * 1 ) * sin( pi * y * 1 ) * sin( pi * z * 1 )); 
 end
 
@@ -48,13 +53,13 @@ function apply_boundary_conditions_elemental(var::Vector{FT}, eid::Int, grid::Gr
 end
 
 ###########Global Matrix Creation for testing purposes to check MATVEC is correct
-function createGlobalMatrix(var::Vector{Float64}, mesh::Grid, refel::Refel, geometric_factors::GeometricFactors, config::FinchConfig ) 
+function createGlobalMatrix(var::Vector{FT}, mesh::Grid, refel::Refel, geometric_factors::GeometricFactors, config::FinchConfig ) where FT<:AbstractFloat
     
     # User specified data types for int and float
     # int type is Int64
-    # float type is Float64
+    # float type is FT
     
-    function genfunction_2(x::Union{Float64,Float64},y::Union{Float64,Float64},z::Union{Float64,Float64}) 
+    function genfunction_2(x::Union{FT,FT},y::Union{FT,FT},z::Union{FT,FT}) where FT<:AbstractFloat
         return 3*pi*pi*sin(pi*x*1)*sin(pi*y*1)*sin(pi*z*1); 
     end
     
@@ -86,9 +91,9 @@ function createGlobalMatrix(var::Vector{Float64}, mesh::Grid, refel::Refel, geom
     next_nonzero_index = (allocated_nonzeros + 1)
     global_matrix_I::Vector{Int64} = zeros(Int64, allocated_nonzeros)
     global_matrix_J::Vector{Int64} = zeros(Int64, allocated_nonzeros)
-    global_matrix_V::Vector{Float64} = zeros(Float64, allocated_nonzeros)
-    global_vector::Vector{Float64} = zeros(Float64, dofs_global)
-    global_solution::Vector{Float64} = zeros(Float64, dofs_global)
+    global_matrix_V::Vector{globalFloatType} = zeros(globalFloatType, allocated_nonzeros)
+    global_vector::Vector{globalFloatType} = zeros(globalFloatType, dofs_global)
+    global_solution::Vector{globalFloatType} = zeros(globalFloatType, dofs_global)
     
     solution = global_solution
 
@@ -96,20 +101,20 @@ function createGlobalMatrix(var::Vector{Float64}, mesh::Grid, refel::Refel, geom
     global_matrix_I .= 1
     global_matrix_J .= 1
     #= Allocate elemental matrix and vector. =#
-    element_matrix::Matrix{Float64} = zeros(Float64, local_system_size, local_system_size)
-    element_vector::Vector{Float64} = zeros(Float64, local_system_size)
+    element_matrix::Matrix{globalFloatType} = zeros(globalFloatType, local_system_size, local_system_size)
+    element_vector::Vector{globalFloatType} = zeros(globalFloatType, local_system_size)
     #= Boundary done flag for each node. =#
     bdry_done::Vector{Int64} = zeros(Int64, nnodes_global)
     #= No indexed variables =#
     index_values::Vector{Int64} = zeros(Int64, 0)
     #= Allocate coefficient vectors. =#
-    detj::Vector{Float64} = zeros(Float64, qnodes_per_element)
+    detj::Vector{globalFloatType} = zeros(globalFloatType, qnodes_per_element)
     #= Allocate for derivative matrices. =#
-    RQ1::Matrix{Float64} = zeros(Float64, qnodes_per_element, nodes_per_element)
-    RQ2::Matrix{Float64} = zeros(Float64, qnodes_per_element, nodes_per_element)
-    RQ3::Matrix{Float64} = zeros(Float64, qnodes_per_element, nodes_per_element)
-    NODALvalue__f_1::Vector{Float64} = zeros(Float64, nodes_per_element)
-    value__f_1::Vector{Float64} = zeros(Float64, qnodes_per_element)
+    RQ1::Matrix{globalFloatType} = zeros(globalFloatType, qnodes_per_element, nodes_per_element)
+    RQ2::Matrix{globalFloatType} = zeros(globalFloatType, qnodes_per_element, nodes_per_element)
+    RQ3::Matrix{globalFloatType} = zeros(globalFloatType, qnodes_per_element, nodes_per_element)
+    NODALvalue__f_1::Vector{globalFloatType} = zeros(globalFloatType, nodes_per_element)
+    value__f_1::Vector{globalFloatType} = zeros(globalFloatType, qnodes_per_element)
     t = 0;
 
     for ei = 1:num_elements
@@ -126,7 +131,7 @@ function createGlobalMatrix(var::Vector{Float64}, mesh::Grid, refel::Refel, geom
             x = mesh.allnodes[1, nodeID]
             y = mesh.allnodes[2, nodeID]
             z = mesh.allnodes[3, nodeID]
-            NODALvalue__f_1[ni]::Float64 = Float64(genfunction_2( x, y, z ))
+            NODALvalue__f_1[ni]::globalFloatType = globalFloatType(genfunction_2( x, y, z ))
         end
 
         for col = 1:qnodes_per_element
@@ -199,18 +204,18 @@ function performMATVEC( configObj, geoFacs, refelVal, gridDataVal, uvals )
 
     solutionVals = zeros( configObj.float_type, nnodes, 1 );
 
-    detj::Vector{Float64} = zeros(configObj.float_type, qnodes_per_element);
+    detj::Vector{globalFloatType} = zeros(configObj.float_type, qnodes_per_element);
     #= Allocate for derivative matrices. =#
-    RQ1::Matrix{Float64} = zeros(configObj.float_type, qnodes_per_element, nodes_per_element);
-    RQ2::Matrix{Float64} = zeros(configObj.float_type, qnodes_per_element, nodes_per_element);
-    RQ3::Matrix{Float64} = zeros(configObj.float_type, qnodes_per_element, nodes_per_element);
+    RQ1::Matrix{globalFloatType} = zeros(configObj.float_type, qnodes_per_element, nodes_per_element);
+    RQ2::Matrix{globalFloatType} = zeros(configObj.float_type, qnodes_per_element, nodes_per_element);
+    RQ3::Matrix{globalFloatType} = zeros(configObj.float_type, qnodes_per_element, nodes_per_element);
 
-    ugrad::Matrix{Float64} = zeros(configObj.float_type, qnodes_per_element, 3);
+    ugrad::Matrix{globalFloatType} = zeros(configObj.float_type, qnodes_per_element, 3);
 
     wg = refelVal.wg;
     uvalsLocal = zeros(configObj.float_type, nodes_per_element, 1);
 
-    element_matrix::Matrix{Float64} = zeros(Float64, nodes_per_element, nodes_per_element);
+    element_matrix::Matrix{globalFloatType} = zeros(globalFloatType, nodes_per_element, nodes_per_element);
 
     for eid = 1:nElements
 
@@ -249,6 +254,179 @@ function performMATVEC( configObj, geoFacs, refelVal, gridDataVal, uvals )
     return solutionVals;
 end
 
+## Serial MATVEC adapted for GPU implementation (GPU serial version 1)
+# Takes more per element memory
+function performMATVEC_version2( float_type, allnodes, loc2glb, uvals, nodebid, detJ, Jval, qnodes_per_element, 
+    nodes_per_element, Qr, Qs, Qt, wg )
+
+    nnodes = size( allnodes, 2 );
+    nElements = size( loc2glb, 2 );
+
+    uvalsLocal::Matrix{float_type} = zeros(float_type, nodes_per_element, 1);
+    solutionVals = zeros( float_type, nnodes, 1 );
+    
+    detj::Vector{float_type} = zeros(float_type, qnodes_per_element);
+    ugrad::Matrix{float_type} = zeros(float_type, qnodes_per_element, 1);
+
+    for eid = 1:nElements
+
+        newUvals = zeros(float_type, nodes_per_element, 1);
+
+        for qnode_i = 1:qnodes_per_element
+            detj[qnode_i] = detJ[qnode_i, eid];
+        end
+
+        J = Jval[eid];
+
+        ## X Direction MATVEC Product
+        Jr = J.rx;
+        Js = J.sx;
+        Jt = J.tx;
+
+        RQ = Qr .* Jr + Qs .* Js + Qt .* Jt;
+
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        ugrad = RQ * uvalsLocal;
+        
+        for pval = 1:nodes_per_element
+            for qp = 1:qnodes_per_element
+                newUvals[ pval, 1 ] = newUvals[ pval, 1 ] + RQ[ qp, pval ] * ugrad[ qp ] * detj[ qp ] * wg[ qp ];
+            end
+        end
+
+        ## Y Direction MATVEC Product
+        Jr = J.ry;
+        Js = J.sy;
+        Jt = J.ty;
+
+        RQ = Qr .* Jr + Qs .* Js + Qt .* Jt;
+
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        ugrad = RQ * uvalsLocal;
+
+        for pval = 1:nodes_per_element
+            for qp = 1:qnodes_per_element
+                newUvals[ pval, 1 ] = newUvals[ pval, 1 ] + RQ[ qp, pval ] * ugrad[ qp ] * detj[ qp ] * wg[ qp ];
+            end
+        end
+
+        ## Z Direction MATVEC Product
+        Jr = J.rz;
+        Js = J.sz;
+        Jt = J.tz;
+
+        RQ = Qr .* Jr + Qs .* Js + Qt .* Jt;
+
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        ugrad = RQ * uvalsLocal;
+
+        for pval = 1:nodes_per_element
+            for qp = 1:qnodes_per_element
+                newUvals[ pval, 1 ] = newUvals[ pval, 1 ] + RQ[ qp, pval ] * ugrad[ qp ] * detj[ qp ] * wg[ qp ];
+            end
+        end
+
+        for localNodeId = 1:nodes_per_element
+
+            globalNodeId = loc2glb[ localNodeId, eid ];
+
+            if( nodebid[ globalNodeId ] == 0 )
+                solutionVals[ globalNodeId ] = solutionVals[ globalNodeId ] .+ newUvals[ localNodeId ];
+            end
+        end
+    end
+
+    return solutionVals;
+end
+
+
+## Serial MATVEC adapted for GPU implementation (GPU serial version 2)
+# Takes less per element memory 
+function performMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, detJ, J, qnodes_per_element, 
+    nodes_per_element, Qr, Qs, Qt, wg )
+
+    nnodes = size( allnodes, 2 );
+    nElements = size( loc2glb, 2 );
+
+    uvalsLocal = zeros(float_type, nodes_per_element, 1);
+    solutionVals = zeros( float_type, nnodes, 1 );
+
+    for eid = 1:nElements
+
+        newUvals = zeros(float_type, nodes_per_element, 1);
+
+        ## X Direction MATVEC Product
+
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        for qp = 1:qnodes_per_element
+            for i = 1:nodes_per_element
+
+                phigrad_qi = Qr[ qp, i ] * J[eid].rx[ qp ] + Qs[ qp, i ] * J[eid].sx[ qp ] + Qt[ qp, i ] * J[eid].tx[ qp ]; 
+                ux_qp = 0;
+                for j = 1:nodes_per_element
+
+                    phigrad_qj = Qr[ qp, j ] * J[eid].rx[ qp ] + Qs[ qp, j ] * J[eid].sx[ qp ] + Qt[ qp, j ] * J[eid].tx[ qp ]; 
+                    ux_qp = ux_qp + uvalsLocal[ j ] * phigrad_qj * detJ[ qp, eid ] * wg[ qp ];
+                end
+
+                newUvals[i] = newUvals[i] + phigrad_qi * ux_qp;
+            end
+        end
+
+        ## Y Direction MATVEC Product
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        for qp = 1:qnodes_per_element
+            for i = 1:nodes_per_element
+
+                phigrad_qi = Qr[ qp, i ] * J[eid].ry[ qp ] + Qs[ qp, i ] * J[eid].sy[ qp ] + Qt[ qp, i ] * J[eid].ty[ qp ]; 
+                ux_qp = 0;
+                for j = 1:nodes_per_element
+
+                    phigrad_qj = Qr[ qp, j ] * J[eid].ry[ qp ] + Qs[ qp, j ] * J[eid].sy[ qp ] + Qt[ qp, j ] * J[eid].ty[ qp ]; 
+                    ux_qp = ux_qp + uvalsLocal[ j ] * phigrad_qj * detJ[ qp, eid ] * wg[ qp ];
+                end
+
+                newUvals[i] = newUvals[i] + phigrad_qi * ux_qp;
+            end
+        end
+
+        ## Z Direction MATVEC Product
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        for qp = 1:qnodes_per_element
+            for i = 1:nodes_per_element
+
+                phigrad_qi = Qr[ qp, i ] * J[eid].rz[ qp ] + Qs[ qp, i ] * J[eid].sz[ qp ] + Qt[ qp, i ] * J[eid].tz[ qp ]; 
+                ux_qp = 0;
+                for j = 1:nodes_per_element
+
+                    phigrad_qj = Qr[ qp, j ] * J[eid].rz[ qp ] + Qs[ qp, j ] * J[eid].sz[ qp ] + Qt[ qp, j ] * J[eid].tz[ qp ]; 
+                    ux_qp = ux_qp + uvalsLocal[ j ] * phigrad_qj * detJ[ qp, eid ] * wg[ qp ];
+                end
+
+                newUvals[i] = newUvals[i] + phigrad_qi * ux_qp;
+            end
+        end
+
+        for localNodeId = 1:nodes_per_element
+
+            globalNodeId = loc2glb[ localNodeId, eid ];
+
+            if( nodebid[ globalNodeId ] == 0 )
+                solutionVals[ globalNodeId ] = solutionVals[ globalNodeId ] .+ newUvals[ localNodeId ];
+            end
+        end
+    end
+
+    return solutionVals;
+end
+
+
 function getRHS( configObj, geoFacs, refelVal, gridDataVal, fvalsNodal, fvalsRHS  )
 
     nnodes = size( gridDataVal.allnodes, 2 );
@@ -256,7 +434,7 @@ function getRHS( configObj, geoFacs, refelVal, gridDataVal, fvalsNodal, fvalsRHS
     qnodes_per_element = refelVal.Nqp;
     nodes_per_element = refelVal.Np;
 
-    detj::Vector{Float64} = zeros(configObj.float_type, qnodes_per_element);  
+    detj::Vector{globalFloatType} = zeros(configObj.float_type, qnodes_per_element);  
     
     wg = refelVal.wg;
     fvalsLocal = zeros(configObj.float_type, nodes_per_element, 1);
@@ -285,67 +463,110 @@ function getRHS( configObj, geoFacs, refelVal, gridDataVal, fvalsNodal, fvalsRHS
     end
 end
 
-gmshfilename = "/home/gaurav/CS6958/Project/Code/Mesh3D/regularMesh3D_lvl3.msh";
+function checkConvergence( gmshFolderName, configObj )
 
-fileVal = open( gmshfilename, "r" );
+    meshvals = readdir( gmshFolderName, join = true )
 
-meshDataVal = read_mesh( fileVal );
+    errorValsL2 = Array{globalFloatType}(undef, size( meshvals, 1 ));
+    errorValsLinf = Array{globalFloatType}(undef, size( meshvals, 1 ));
+    numNodeVals = Array{globalFloatType}(undef, size( meshvals, 1 ));
+    hVals = Array{globalFloatType}(undef, size( meshvals, 1 ));
 
-configObj = FinchConfig();
+    for (index, meshval) in enumerate(meshvals)
 
-refelVal, gridDataVal = grid_from_mesh( meshDataVal, configObj );
+        val = match( r"lvl", meshval )
 
-nnodes = size( gridDataVal.allnodes, 2 );
+        if !isnothing( val )
+            lvlstr =  match( r"lvl", meshval )
+            lvloffset = lvlstr.offset + 3
+            lvlval = match( r"[0-9]+", meshval[ lvloffset:end ] )
+            lvlval = lvlval.match
+        end
 
-uvals = zeros( configObj.float_type, nnodes, 1 );
-rhsNodeVals = zeros( configObj.float_type, nnodes, 1 );
-exactvals = zeros( configObj.float_type, nnodes, 1 );
+        fileVal = open( meshval, "r" );
 
-for nodeId = 1:nnodes
+        println(meshval)
+        meshDataVal = read_mesh( fileVal );
 
-    nodeCoords = gridDataVal.allnodes[ :, nodeId ];
-    uvals[ nodeId, 1 ] = initFunction( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
-    rhsNodeVals[ nodeId, 1 ] = rhsNodalFunction( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
-    exactvals[ nodeId, 1 ] = exactSol( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
+        global refelVal, gridDataVal = grid_from_mesh( meshDataVal, configObj );
+
+        nnodes = size( gridDataVal.allnodes, 2 );
+        numNodeVals[index] = nnodes;
+
+        uvals = zeros( configObj.float_type, nnodes, 1 );
+        rhsNodeVals = zeros( configObj.float_type, nnodes, 1 );
+        exactvals = zeros( configObj.float_type, nnodes, 1 );
+
+        for nodeId = 1:nnodes
+
+            nodeCoords = gridDataVal.allnodes[ :, nodeId ];
+            uvals[ nodeId, 1 ] = initFunction( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
+            rhsNodeVals[ nodeId, 1 ] = rhsNodalFunction( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
+            exactvals[ nodeId, 1 ] = exactSol( nodeCoords[1], nodeCoords[2], nodeCoords[3] );
+        end
+
+        global geoFacs = build_geometric_factors( configObj, refelVal, gridDataVal, do_face_detj = false, 
+            do_vol_area = false, constant_jacobian = false );
+
+        global fValsRHS = zeros( configObj.float_type, nnodes, 1 );
+        getRHS( configObj, geoFacs, refelVal, gridDataVal, rhsNodeVals, fValsRHS  );
+        
+        A = SizedStrangMatrix((length( fValsRHS ),length( fValsRHS ) ) );
+        
+        matVals, globalVec = createGlobalMatrix([0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
+
+        U = gmres( A, fValsRHS; reltol = 1e-14, verbose = true )
+
+        ### Residual Error test
+        @test isapprox( A* U, fValsRHS, atol = 1e-6 )
+
+        ### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
+        solutionValuesMATVEC = performMATVEC( configObj, geoFacs, refelVal, gridDataVal, fValsRHS );
+        solutionValuesMatMul = matVals * fValsRHS;
+        @test isapprox( solutionValuesMatMul, solutionValuesMATVEC, atol = 1e-6 )
+
+        ### Solution Error to check correct solution and convergence
+        solutionErrorVec = U - exactvals;
+        solutionErrorL2 = norm( solutionErrorVec / nnodes, 2 );
+        solutionErrorLinf = norm( solutionErrorVec, Inf );
+
+        errorValsL2[index] = solutionErrorL2;
+        errorValsLinf[index] = solutionErrorLinf;
+
+        hVals[index] = 1/(nnodes^(2/3));
+
+    end
+
+    figure(1)
+    loglog( numNodeVals, errorValsL2[:], label = L"L^2" * " Error" )
+    loglog( numNodeVals, hVals[:], label = L"h^2" )
+    legend()
+
+    figure(2)
+    loglog( numNodeVals, errorValsLinf[:], label = L"L_{\infty}" * " Error" )
+    loglog( numNodeVals, hVals[:], label = L"h^2" )
+    legend()
+    
 end
-
-geoFacs = build_geometric_factors( configObj, refelVal, gridDataVal, do_face_detj = false, 
-    do_vol_area = false, constant_jacobian = false );
-
-fValsRHS = zeros( configObj.float_type, nnodes, 1 );
-getRHS( configObj, geoFacs, refelVal, gridDataVal, rhsNodeVals, fValsRHS  );
 
 struct SizedStrangMatrix
     size::Tuple{Int,Int}
 end
 
-Base.eltype(A::SizedStrangMatrix) = Float64;
+Base.eltype(A::SizedStrangMatrix) = globalFloatType;
 Base.size(A::SizedStrangMatrix) = A.size;
 Base.size(A::SizedStrangMatrix,i::Int) = A.size[i];
 
-A = SizedStrangMatrix((length( fValsRHS ),length( fValsRHS ) ) );
+gmshFolderName = "/home/gaurav/CS6958/Project/Code/Mesh3D/";
 
-matVals, globalVec = createGlobalMatrix([0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
+configObj = FinchConfig();
 
 function mul!( C,A::SizedStrangMatrix,B )
-    C[:] = performMATVEC( configObj, geoFacs, refelVal, gridDataVal, B );
+    C[:] = performMATVEC_version3( configObj.float_type, gridDataVal.allnodes, gridDataVal.loc2glb, B,
+     gridDataVal.nodebid, geoFacs.detJ, geoFacs.J, refelVal.Nqp, refelVal.Np, 
+     refelVal.Qr, refelVal.Qs, refelVal.Qt, refelVal.wg );
 end
 
-LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) ), A, B);
+LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) ), A, B);        
 
-U = gmres( matVals, fValsRHS; reltol = 1e-14, verbose = true )
-
-using Test
-
-### Residual Error test
-@test isapprox( A* U, fValsRHS, atol = 1e-6 )
-
-### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
-solutionValuesMATVEC = performMATVEC( configObj, geoFacs, refelVal, gridDataVal, fValsRHS );
-solutionValuesMatMul = matVals * fValsRHS;
-@test isapprox( solutionValuesMatMul, solutionValuesMATVEC, atol = 1e-6 )
-
-### Solution Error to check correct solution and convergence
-solutionErrorVec = U - exactvals;
-solutionErrorL2 = norm( solutionErrorVec / nnodes, 2 );
-solutionErrorLInf = norm( solutionErrorVec, Inf );
+checkConvergence( gmshFolderName, configObj )
