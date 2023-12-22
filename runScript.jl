@@ -493,14 +493,15 @@ function performGPUMATVEC_version3( allnodes, loc2glb, uvals, nodebid, nnodes, n
     ## All directions MATVEC Product in one loop
 
     if (eid <= nElements)
-        for qp = 1:qnodes_per_element
-            for i = 1:nodes_per_element
+        for i = 1:nodes_per_element
 
-                @inbounds globalNodeId_i = loc2glb[ i, eid ];
+            solutionVal = 0;
+            globalNodeId_i = loc2glb[ i, eid ];
+            
+            if( nodebid[ globalNodeId_i ] == 0 )
+                for qp = 1:qnodes_per_element                    
 
-                if( nodebid[ globalNodeId_i ] == 0 )
-
-                    @inbounds phigradx_qi = Qr[ qp, i ] * rx[ qp, eid ] + Qs[ qp, i ] * sx[ qp, eid ] + Qt[ qp, i ] * tx[ qp, eid ]; 
+                    phigradx_qi = Qr[ qp, i ] * rx[ qp, eid ] + Qs[ qp, i ] * sx[ qp, eid ] + Qt[ qp, i ] * tx[ qp, eid ]; 
                     phigrady_qi = Qr[ qp, i ] * ry[ qp, eid ] + Qs[ qp, i ] * sy[ qp, eid ] + Qt[ qp, i ] * ty[ qp, eid ]; 
                     phigradz_qi = Qr[ qp, i ] * rz[ qp, eid ] + Qs[ qp, i ] * sz[ qp, eid ] + Qt[ qp, i ] * tz[ qp, eid ]; 
 
@@ -522,10 +523,11 @@ function performGPUMATVEC_version3( allnodes, loc2glb, uvals, nodebid, nnodes, n
 
                     end
 
-                    CUDA.@atomic solutionVals[ globalNodeId_i ] = solutionVals[ globalNodeId_i ] +
-                        phigradx_qi * ux_qp + phigrady_qi * uy_qp + phigradz_qi * uz_qp;
+                    solutionVal = solutionVal + phigradx_qi * ux_qp + phigrady_qi * uy_qp + phigradz_qi * uz_qp;
                 end
             end
+
+            CUDA.@atomic solutionVals[ globalNodeId_i ] = solutionVals[ globalNodeId_i ] + solutionVal
         end
     end
 
@@ -691,7 +693,7 @@ function testGPUMATVEC( fileVal, configObj )
 
     nnodes = size( gridDataVal.allnodes, 2 );
     nElements = size( gridDataVal.loc2glb, 2 );
-    qnodes_per_element = size( refelVal.Qr, 1 )
+    qnodes_per_element = refelVal.Nqp
 
     rx = zeros( qnodes_per_element, nElements );
     ry = zeros( qnodes_per_element, nElements );
@@ -706,8 +708,8 @@ function testGPUMATVEC( fileVal, configObj )
     for eid = 1:nElements
 
         rx[ :, eid ] = geoFacs.J[eid].rx[:];
-        rx[ :, eid ] = geoFacs.J[eid].rx[:];
-        rx[ :, eid ] = geoFacs.J[eid].rx[:];
+        ry[ :, eid ] = geoFacs.J[eid].ry[:];
+        rz[ :, eid ] = geoFacs.J[eid].rz[:];
         sx[ :, eid ] = geoFacs.J[eid].sx[:];
         sy[ :, eid ] = geoFacs.J[eid].sy[:];
         sz[ :, eid ] = geoFacs.J[eid].sz[:];
@@ -747,8 +749,16 @@ function testGPUMATVEC( fileVal, configObj )
     solutionValuesMatMul = matVals * fValsRHS;
 
     cpuSolutionValues = Array( solutionValuesMATVEC );
-    
-    println( norm( solutionValuesMatMul - cpuSolutionValues ) )
+
+    filename = "saveValsMatMul.txt";
+    fileval1 = open( filename, "w" );
+    println( fileval1, solutionValuesMatMul )
+    close(fileval1)
+
+    filename = "saveValsMatVec.txt";
+    fileval2 = open( filename, "w" );
+    println( fileval2, cpuSolutionValues )
+    close(fileval2)
     @test isapprox( solutionValuesMatMul, cpuSolutionValues, atol = 1e-6 )
 
     
