@@ -147,6 +147,61 @@ function performMATVEC_version1( float_type, allnodes, loc2glb, uvals, nodebid, 
     return solutionVals;
 end
 
+## Serial MATVEC adapted for GPU implementation (GPU serial version 1)
+# Takes more per element memory
+function performMATVEC_version1_Modified( float_type, allnodes, loc2glb, uvals, nodebid, detJ, Jval, qnodes_per_element, 
+    nodes_per_element, Qr, Qs, Qt, wg )
+
+    nnodes = size( allnodes, 2 );
+    nElements = size( loc2glb, 2 );
+
+    uvalsLocal::Matrix{float_type} = zeros(float_type, nodes_per_element, 1);
+    solutionVals = zeros( float_type, nnodes, 1 );
+    
+    detj::Vector{float_type} = zeros(float_type, qnodes_per_element);
+    ugrad::Matrix{float_type} = zeros(float_type, qnodes_per_element, 1);
+
+    for eid = 1:nElements
+
+        newUvals = zeros(float_type, nodes_per_element, 1);
+
+        for qnode_i = 1:qnodes_per_element
+            detj[qnode_i] = detJ[qnode_i, eid];
+        end
+
+        J = Jval[eid];
+
+        RQ1 = Qr .* J.rx + Qs .* J.sx + Qt .* J.tx;
+        RQ2 = Qr .* J.ry + Qs .* J.sy + Qt .* J.ty;
+        RQ3 = Qr .* J.rz + Qs .* J.sz + Qt .* J.tz;
+
+        uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
+
+        ugradx = RQ1 * uvalsLocal;
+        ugrady = RQ2 * uvalsLocal;
+        ugradz = RQ3 * uvalsLocal;
+        
+        for pval = 1:nodes_per_element
+            for qp = 1:qnodes_per_element
+                newUvals[ pval, 1 ] = newUvals[ pval, 1 ] + ( 
+                    RQ1[ qp, pval ] * ugradx[ qp ] +
+                    RQ2[ qp, pval ] * ugrady[ qp ] + 
+                    RQ3[ qp, pval ] * ugradz[ qp ] ) * detj[ qp ] * wg[ qp ];
+            end
+        end
+
+        for localNodeId = 1:nodes_per_element
+
+            globalNodeId = loc2glb[ localNodeId, eid ];
+
+            if( nodebid[ globalNodeId ] == 0 )
+                solutionVals[ globalNodeId ] = solutionVals[ globalNodeId ] .+ newUvals[ localNodeId ];
+            end
+        end
+    end
+
+    return solutionVals;
+end
 
 ## Serial MATVEC adapted for GPU implementation (GPU serial version 2)
 # Takes less per element memory 
@@ -245,8 +300,8 @@ function performMATVEC_version3( float_type, allnodes, loc2glb, uvals, nodebid, 
         ## All directions MATVEC Product in one loop
         uvalsLocal[:, 1] = uvals[ loc2glb[ :, eid ] ];
 
-        for qp = 1:qnodes_per_element
-            for i = 1:nodes_per_element
+        for i = 1:nodes_per_element
+            for qp = 1:qnodes_per_element
 
                 phigradx_qi = Qr[ qp, i ] * J[eid].rx[ qp ] + Qs[ qp, i ] * J[eid].sx[ qp ] + Qt[ qp, i ] * J[eid].tx[ qp ]; 
                 phigrady_qi = Qr[ qp, i ] * J[eid].ry[ qp ] + Qs[ qp, i ] * J[eid].sy[ qp ] + Qt[ qp, i ] * J[eid].ty[ qp ]; 

@@ -20,6 +20,7 @@ using LaTeXStrings
 using CUDA
 using Adapt
 using StaticArrays
+using BenchmarkTools
 
 globalFloatType = Float32;
 
@@ -115,6 +116,44 @@ function testMATVEC( fileVal, configObj )
     
     solutionValuesMatMul = matVals * fValsRHS;
     @test isapprox( solutionValuesMatMul, solutionValuesMATVEC, atol = 1e-6 )
+
+end
+
+function profileMATVEC( fileVal, configObj )
+
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    
+    ### Serial MATVEC performance
+    # Finch version
+    matvecBenchFinch = @benchmarkable solutionValuesMATVEC = performMATVEC( $configObj, $geoFacs, $refelVal, $gridDataVal, $fValsRHS )
+
+    # version 1
+    matvecBenchv1 = @benchmarkable solutionValuesMATVEC = performMATVEC_version1_Modified( $configObj.float_type, $gridDataVal.allnodes, $gridDataVal.loc2glb, $fValsRHS,
+        $gridDataVal.nodebid, $geoFacs.detJ, $geoFacs.J, $refelVal.Nqp, $refelVal.Np, $refelVal.Qr, $refelVal.Qs, $refelVal.Qt, $refelVal.wg );
+
+    # version 2 
+    matvecBenchv2 = @benchmarkable solutionValuesMATVEC = performMATVEC_version2( $configObj.float_type, $gridDataVal.allnodes, $gridDataVal.loc2glb, $fValsRHS,
+        $gridDataVal.nodebid, $geoFacs.detJ, $geoFacs.J, $refelVal.Nqp, $refelVal.Np, $refelVal.Qr, $refelVal.Qs, $refelVal.Qt, $refelVal.wg );
+
+    # version 3
+    matvecBenchv3 = @benchmarkable solutionValuesMATVEC = performMATVEC_version3( $configObj.float_type, $gridDataVal.allnodes, $gridDataVal.loc2glb, $fValsRHS,
+        $gridDataVal.nodebid, $geoFacs.detJ, $geoFacs.J, $refelVal.Nqp, $refelVal.Np, $refelVal.Qr, $refelVal.Qs, $refelVal.Qt, $refelVal.wg );
+
+    tune!(matvecBenchFinch);
+    tune!(matvecBenchv1);
+    tune!(matvecBenchv2);
+    tune!(matvecBenchv3);
+
+    mFinch = median( run(matvecBenchFinch) )
+    m1 = median( run(matvecBenchv1) )
+    m2 = median( run(matvecBenchv2) )
+    m3 = median( run(matvecBenchv3) )
+    # println(BenchmarkTools.DEFAULT_PARAMETERS)
+
+    println( mFinch )
+    println( m1 )
+    println( m2 )
+    println( m3 )
 
 end
 
@@ -225,6 +264,7 @@ LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) 
 # checkConvergence( gmshFolderName, configObj )
 Adapt.@adapt_structure JacobianDevice
 
-gmshFileName = gmshFolderName * "regularMesh3D_lvl3.msh";
+gmshFileName = gmshFolderName * "regularMesh3D_lvl2.msh";
 fileVal = open( gmshFileName )
-testGPUMATVEC( fileVal, configObj )
+# testGPUMATVEC( fileVal, configObj )
+profileMATVEC( fileVal, configObj )
