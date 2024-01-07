@@ -123,37 +123,68 @@ function profileMATVEC( fileVal, configObj )
 
     gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
     
-    ### Serial MATVEC performance
-    # Finch version
-    matvecBenchFinch = @benchmarkable solutionValuesMATVEC = performMATVEC( $configObj, $geoFacs, $refelVal, $gridDataVal, $fValsRHS )
+    funcVals = [ performMATVEC, performMATVEC_version1_Modified, performMATVEC_version2, performMATVEC_version3 ];
 
-    # version 1
-    matvecBenchv1 = @benchmarkable solutionValuesMATVEC = performMATVEC_version1_Modified( $configObj.float_type, $gridDataVal.allnodes, $gridDataVal.loc2glb, $fValsRHS,
-        $gridDataVal.nodebid, $geoFacs.detJ, $geoFacs.J, $refelVal.Nqp, $refelVal.Np, $refelVal.Qr, $refelVal.Qs, $refelVal.Qt, $refelVal.wg );
+    matvecVersionParams = [configObj.float_type, gridDataVal.allnodes, gridDataVal.loc2glb, fValsRHS,
+        gridDataVal.nodebid, geoFacs.detJ, geoFacs.J, refelVal.Nqp, refelVal.Np, refelVal.Qr, refelVal.Qs,
+        refelVal.Qt, refelVal.wg ]
 
-    # version 2 
-    matvecBenchv2 = @benchmarkable solutionValuesMATVEC = performMATVEC_version2( $configObj.float_type, $gridDataVal.allnodes, $gridDataVal.loc2glb, $fValsRHS,
-        $gridDataVal.nodebid, $geoFacs.detJ, $geoFacs.J, $refelVal.Nqp, $refelVal.Np, $refelVal.Qr, $refelVal.Qs, $refelVal.Qt, $refelVal.wg );
+    matvecFinchVersionParams = [configObj, geoFacs, refelVal, gridDataVal, fValsRHS]
 
-    # version 3
-    matvecBenchv3 = @benchmarkable solutionValuesMATVEC = performMATVEC_version3( $configObj.float_type, $gridDataVal.allnodes, $gridDataVal.loc2glb, $fValsRHS,
-        $gridDataVal.nodebid, $geoFacs.detJ, $geoFacs.J, $refelVal.Nqp, $refelVal.Np, $refelVal.Qr, $refelVal.Qs, $refelVal.Qt, $refelVal.wg );
+    paramVals = [ matvecFinchVersionParams, matvecVersionParams, matvecVersionParams, matvecVersionParams ]
 
-    tune!(matvecBenchFinch);
-    tune!(matvecBenchv1);
-    tune!(matvecBenchv2);
-    tune!(matvecBenchv3);
+    tagVals = [ "FinchVersion_NoLoops", "QuadratureLoopWithoutDerivative", "QuadratureLoopWithDerivative_NoFusion",
+    "QuadratureLoopWithDerivative_Fused" ]
 
-    mFinch = median( run(matvecBenchFinch) )
-    m1 = median( run(matvecBenchv1) )
-    m2 = median( run(matvecBenchv2) )
-    m3 = median( run(matvecBenchv3) )
-    # println(BenchmarkTools.DEFAULT_PARAMETERS)
+    matvecBench = BenchmarkGroup()
 
-    println( mFinch )
-    println( m1 )
-    println( m2 )
-    println( m3 )
+    for (idx, funcVal) in enumerate( funcVals )
+        matvecBench[ tagVals[idx] ] = @benchmarkable solutionValuesMATVEC = $(funcVal)( $paramVals[$idx]... )
+    end
+
+    tune!(matvecBench)
+    results = run(matvecBench, verbose = true )
+
+    for tagVal in tagVals
+        println( median( results[tagVal] ) )
+    end
+
+    return results, tagVals
+
+end
+
+function serialMATVECScaling( gmshFolderName, configObj )
+
+    meshVals = readdir( gmshFolderName, join = true )
+
+    perfVals = zeros( length( meshVals ) )
+
+    for (meshIdx, meshVal) in enumerate( meshVals )
+        val = match( r"lvl", meshVal )
+
+        if !isnothing( val )
+            lvlStr =  match( r"lvl", meshVal )
+            lvlOffset = lvlStr.offset + 3
+            lvlVal = match( r"[0-9]+", meshVal[ lvlOffset:end ] )
+            lvlVal = lvlVal.match
+        end
+
+        fileVal = open( meshVal )
+        (results, tagVals) = profileMATVEC( fileVal, configObj )
+        # medianVal = median( results )
+        
+        # for tagVal in tagVals
+        #     perf
+        #     perfVals[ lvlVal ]
+        # end
+        # perfVals[ lvlVal + 1 ] = medianVal.time
+
+    end
+
+    # allLevels = 1:length( meshVals );
+
+    # figure(1)
+    # plot( allLevels, perfVals )
 
 end
 
@@ -267,4 +298,6 @@ Adapt.@adapt_structure JacobianDevice
 gmshFileName = gmshFolderName * "regularMesh3D_lvl2.msh";
 fileVal = open( gmshFileName )
 # testGPUMATVEC( fileVal, configObj )
-profileMATVEC( fileVal, configObj )
+# profileMATVEC( fileVal, configObj )
+
+serialMATVECScaling( gmshFolderName, configObj )
