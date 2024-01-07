@@ -183,9 +183,6 @@ function serialMATVECScaling( gmshFolderName, configObj )
 
         for (lvlVal, benchVal) in matvecBenchGroups
 
-            println(lvlVal)
-            println(benchVal)
-
             medianVal = median(benchVal[ tagVal ]);
             medianTimeVal = medianVal.time;
             perfVals[ lvlVal ] = medianTimeVal * (10 ^ (-6));
@@ -203,43 +200,59 @@ function serialMATVECScaling( gmshFolderName, configObj )
 
 end
 
-function testGPUMATVEC( fileVal, configObj )
+function getIndexTuple( dxn, qnodes_per_element, eid )
 
-    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    if dxn == 1
+        return ( 1:qnodes_per_element, eid )
+    elseif dxn == 2
+        return ( eid, 1:qnodes_per_element )
+    else
+        println("Invalid dxn")
+        return
+    end
+
+end
+
+function getInitializerTuple( dxn, qnodes_per_element, nElements )
+
+    if dxn == 1
+        return ( qnodes_per_element, nElements )
+    elseif dxn == 2
+        return ( nElements, qnodes_per_element )
+    else
+        println("Invalid dxn")
+        return
+    end
+
+end
+
+function initializeGPUArrays( qnodes_per_element, nElements, Qr, Qs, Qt, wg, geoFacs, float_type, nnodes, dxn )
+
+    initTuple = getInitializerTuple( dxn, qnodes_per_element, nElements )
+
+    rx = zeros( initTuple... );
+    ry = zeros( initTuple... );
+    rz = zeros( initTuple... );
+    tx = zeros( initTuple... );
+    ty = zeros( initTuple... );
+    tz = zeros( initTuple... );
+    sx = zeros( initTuple... );
+    sy = zeros( initTuple... );
+    sz = zeros( initTuple... );
     
-    matVals, globalVec = createGlobalMatrix(Float32[0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
-
-    allnodes_d = CuArray( gridDataVal.allnodes )
-    loc2glb_d = CuArray( gridDataVal.loc2glb )
-    fValsRHS_d = CuArray( fValsRHS )
-    nodebid_d = CuArray( gridDataVal.nodebid )
-    detJ_d = CuArray( geoFacs.detJ )
-
-    nnodes = size( gridDataVal.allnodes, 2 );
-    nElements = size( gridDataVal.loc2glb, 2 );
-    qnodes_per_element = refelVal.Nqp
-
-    rx = zeros( qnodes_per_element, nElements );
-    ry = zeros( qnodes_per_element, nElements );
-    rz = zeros( qnodes_per_element, nElements );
-    tx = zeros( qnodes_per_element, nElements );
-    ty = zeros( qnodes_per_element, nElements );
-    tz = zeros( qnodes_per_element, nElements );
-    sx = zeros( qnodes_per_element, nElements );
-    sy = zeros( qnodes_per_element, nElements );
-    sz = zeros( qnodes_per_element, nElements );
-
     for eid = 1:nElements
 
-        rx[ :, eid ] = geoFacs.J[eid].rx[:];
-        ry[ :, eid ] = geoFacs.J[eid].ry[:];
-        rz[ :, eid ] = geoFacs.J[eid].rz[:];
-        sx[ :, eid ] = geoFacs.J[eid].sx[:];
-        sy[ :, eid ] = geoFacs.J[eid].sy[:];
-        sz[ :, eid ] = geoFacs.J[eid].sz[:];
-        tx[ :, eid ] = geoFacs.J[eid].tx[:];
-        ty[ :, eid ] = geoFacs.J[eid].ty[:];
-        tz[ :, eid ] = geoFacs.J[eid].tz[:];
+        idxTuple = getIndexTuple( dxn, qnodes_per_element, eid )
+
+        rx[ idxTuple... ] = geoFacs.J[eid].rx[:];
+        ry[ idxTuple... ] = geoFacs.J[eid].ry[:];
+        rz[ idxTuple... ] = geoFacs.J[eid].rz[:];
+        sx[ idxTuple... ] = geoFacs.J[eid].sx[:];
+        sy[ idxTuple... ] = geoFacs.J[eid].sy[:];
+        sz[ idxTuple... ] = geoFacs.J[eid].sz[:];
+        tx[ idxTuple... ] = geoFacs.J[eid].tx[:];
+        ty[ idxTuple... ] = geoFacs.J[eid].ty[:];
+        tz[ idxTuple... ] = geoFacs.J[eid].tz[:];
 
     end
 
@@ -260,11 +273,36 @@ function testGPUMATVEC( fileVal, configObj )
 
     solutionValuesMATVEC = CuArray( zeros( configObj.float_type, nnodes ) );
 
+    return (rx_d, ry_d, rz_d, tx_d, ty_d, tz_d, sx_d, sy_d, sz_d, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC)
+end
+
+function testGPUMATVEC( fileVal, configObj )
+
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    
+    matVals, globalVec = createGlobalMatrix(Float32[0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
+
+    allnodes_d = CuArray( gridDataVal.allnodes )
+    loc2glb_d = CuArray( gridDataVal.loc2glb )
+    fValsRHS_d = CuArray( fValsRHS )
+    nodebid_d = CuArray( gridDataVal.nodebid )
+    detJ_d = CuArray( geoFacs.detJ )
+
+    nnodes = size( gridDataVal.allnodes, 2 );
+    nElements = size( gridDataVal.loc2glb, 2 );
+    qnodes_per_element = refelVal.Nqp
+
+    dxn = 2
+    
+    (rx_d, ry_d, rz_d, tx_d, ty_d, tz_d, sx_d, sy_d, sz_d, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC) = 
+        initializeGPUArrays( qnodes_per_element, nElements, refelVal.Qr, refelVal.Qs, refelVal.Qt, refelVal.wg,
+        geoFacs, configObj.float_type, nnodes, dxn )
+
     numthreads = 256
     numblocks = ceil(Int, nElements / numthreads )
 
     CUDA.@sync begin
-        @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version3( allnodes_d, loc2glb_d, fValsRHS_d, 
+        @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version2( allnodes_d, loc2glb_d, fValsRHS_d, 
         nodebid_d, nnodes, nElements, detJ_d, rx_d, ry_d, rz_d, sx_d, sy_d, sz_d, tx_d, ty_d, tz_d, refelVal.Nqp, refelVal.Np,
         Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC );
     end
@@ -312,7 +350,7 @@ Adapt.@adapt_structure JacobianDevice
 
 gmshFileName = gmshFolderName * "regularMesh3D_lvl2.msh";
 fileVal = open( gmshFileName )
-# testGPUMATVEC( fileVal, configObj )
+testGPUMATVEC( fileVal, configObj )
 # profileMATVEC( fileVal, configObj )
 
-serialMATVECScaling( gmshFolderName, configObj )
+# serialMATVECScaling( gmshFolderName, configObj )
