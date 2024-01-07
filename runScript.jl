@@ -21,6 +21,8 @@ using CUDA
 using Adapt
 using StaticArrays
 using BenchmarkTools
+# using BenchmarkPlots
+# using StatsPlots
 
 globalFloatType = Float32;
 
@@ -119,7 +121,7 @@ function testMATVEC( fileVal, configObj )
 
 end
 
-function profileMATVEC( fileVal, configObj )
+function profileMATVEC( fileVal, configObj, matvecBench )
 
     gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
     
@@ -133,10 +135,8 @@ function profileMATVEC( fileVal, configObj )
 
     paramVals = [ matvecFinchVersionParams, matvecVersionParams, matvecVersionParams, matvecVersionParams ]
 
-    tagVals = [ "FinchVersion_NoLoops", "QuadratureLoopWithoutDerivative", "QuadratureLoopWithDerivative_NoFusion",
+    tagVals = [ "VectorizedVersion_NoLoops", "QuadratureLoop_DerivativeVectorized", "QuadratureLoopWithDerivative_NoFusion",
     "QuadratureLoopWithDerivative_Fused" ]
-
-    matvecBench = BenchmarkGroup()
 
     for (idx, funcVal) in enumerate( funcVals )
         matvecBench[ tagVals[idx] ] = @benchmarkable solutionValuesMATVEC = $(funcVal)( $paramVals[$idx]... )
@@ -144,10 +144,6 @@ function profileMATVEC( fileVal, configObj )
 
     tune!(matvecBench)
     results = run(matvecBench, verbose = true )
-
-    for tagVal in tagVals
-        println( median( results[tagVal] ) )
-    end
 
     return results, tagVals
 
@@ -157,6 +153,10 @@ function serialMATVECScaling( gmshFolderName, configObj )
 
     meshVals = readdir( gmshFolderName, join = true )
 
+    matvecBench = BenchmarkGroup()
+
+    tagVals = []
+    lvlVals = zeros( length( meshVals ) )
     perfVals = zeros( length( meshVals ) )
 
     for (meshIdx, meshVal) in enumerate( meshVals )
@@ -166,25 +166,40 @@ function serialMATVECScaling( gmshFolderName, configObj )
             lvlStr =  match( r"lvl", meshVal )
             lvlOffset = lvlStr.offset + 3
             lvlVal = match( r"[0-9]+", meshVal[ lvlOffset:end ] )
-            lvlVal = lvlVal.match
+            lvlVal = parse( Int64, lvlVal.match) + 1
         end
 
         fileVal = open( meshVal )
-        (results, tagVals) = profileMATVEC( fileVal, configObj )
-        # medianVal = median( results )
-        
-        # for tagVal in tagVals
-        #     perf
-        #     perfVals[ lvlVal ]
-        # end
-        # perfVals[ lvlVal + 1 ] = medianVal.time
+        lvlVals[ lvlVal ] = lvlVal
 
+        ( matvecBench[lvlVal], tagVals ) = profileMATVEC( fileVal, configObj, BenchmarkGroup() )
+    
     end
 
-    # allLevels = 1:length( meshVals );
+    figure(1)
 
-    # figure(1)
-    # plot( allLevels, perfVals )
+    for tagVal in tagVals
+        matvecBenchGroups = matvecBench[@tagged (tagVal)]
+
+        for (lvlVal, benchVal) in matvecBenchGroups
+
+            println(lvlVal)
+            println(benchVal)
+
+            medianVal = median(benchVal[ tagVal ]);
+            medianTimeVal = medianVal.time;
+            perfVals[ lvlVal ] = medianTimeVal * (10 ^ (-6));
+
+        end
+
+        plot( lvlVals, perfVals, label = tagVal, "-o" )
+    end
+
+    legend()
+    xlabel("Levels")
+    ylabel("Time (ms)")
+    figname = "Plots/SerialMATVECScaling.png";
+    savefig( figname );
 
 end
 
