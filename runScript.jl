@@ -121,6 +121,11 @@ function testMATVEC( fileVal, configObj )
 
 end
 
+function getSerialMATVECBenchmarkGroup( params, funcVal )
+
+    return @benchmarkable solutionValuesMATVEC = $(funcVal)( $params... )
+end
+
 function profileMATVEC( fileVal, configObj, matvecBench )
 
     gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
@@ -139,7 +144,8 @@ function profileMATVEC( fileVal, configObj, matvecBench )
     "QuadratureLoopWithDerivative_Fused" ]
 
     for (idx, funcVal) in enumerate( funcVals )
-        matvecBench[ tagVals[idx] ] = @benchmarkable solutionValuesMATVEC = $(funcVal)( $paramVals[$idx]... )
+        # matvecBench[ tagVals[idx] ] = @benchmarkable solutionValuesMATVEC = $(funcVal)( $paramVals[$idx]... )
+        matvecBench[ tagVals[idx] ] = getSerialMATVECBenchmarkGroup( paramVals[idx], funcVal ) 
     end
 
     tune!(matvecBench)
@@ -200,6 +206,119 @@ function serialMATVECScaling( gmshFolderName, configObj )
 
 end
 
+function profileBestSerialMATVEC( fileVal, configObj, matvecBench, serialFuncVal = performMATVEC, serialTagVal = "BestSerialVersion" )
+
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    
+    matvecFinchVersionParams = [configObj, geoFacs, refelVal, gridDataVal, fValsRHS]
+
+    matvecBench[ serialTagVal ] = getSerialMATVECBenchmarkGroup( matvecFinchVersionParams, serialFuncVal ) 
+
+    tune!(matvecBench)
+    results = run(matvecBench, verbose = true )
+
+    return results
+
+end
+
+function benchGPU( funcVal, params, numthreads, numblocks )
+
+    CUDA.@sync begin
+        @cuda threads = numthreads blocks = numblocks funcVal( params... )
+    end
+
+end
+
+function profileGPUMATVEC( fileVal, configObj, matvecBench )
+
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    
+    funcVals = [ performGPUMATVEC_version1, performGPUMATVEC_version2 ];
+    tagVals = [ "gpuVersion1", "gpuVersion2" ]
+
+    paramVals = [getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, 1 ), 
+    getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, 2 ) ]
+
+    nElements = size( gridDataVal.loc2glb, 2 );
+
+    numthreads = 256
+    numblocks = ceil(Int, nElements / numthreads )
+
+    for (idx, funcVal) in enumerate( funcVals )
+        matvecBench[ tagVals[idx] ] = @benchmarkable $benchGPU( $funcVal, $paramVals[$idx], $numthreads, $numblocks )
+    end
+
+    # CUDA.@profile benchGPU( funcVals[1], paramVals[1], numthreads, numblocks );
+
+    tune!(matvecBench)
+    results = run(matvecBench, verbose = true )
+
+    return results, tagVals
+
+end
+
+function gpuMATVECGridScaling( gmshFolderName, configObj )
+
+    meshVals = readdir( gmshFolderName, join = true )
+
+    gpuMatvecBench = BenchmarkGroup()
+    bestSerialMATVECBench = BenchmarkGroup()
+
+    tagVals = []
+    lvlVals = zeros( length( meshVals ) )
+    perfVals = zeros( length( meshVals ) )
+
+    for (meshIdx, meshVal) in enumerate( meshVals[1:3] )
+        val = match( r"lvl", meshVal )
+
+        if !isnothing( val )
+            lvlStr =  match( r"lvl", meshVal )
+            lvlOffset = lvlStr.offset + 3
+            lvlVal = match( r"[0-9]+", meshVal[ lvlOffset:end ] )
+            lvlVal = parse( Int64, lvlVal.match) + 1
+        end
+
+        lvlVals[ lvlVal ] = lvlVal
+
+        fileVal = open( meshVal )
+        ( gpuMatvecBench[lvlVal], tagVals ) = profileGPUMATVEC( fileVal, configObj, BenchmarkGroup() )
+        close(fileVal)
+
+        fileVal = open( meshVal )
+        bestSerialMATVECBench[lvlVal] = profileBestSerialMATVEC( fileVal, configObj, BenchmarkGroup() )
+        close(fileVal)
+    end
+
+    serialTagVal = "BestSerialVersion";
+    figure(1)
+
+    for tagVal in tagVals
+        gpuMatvecBenchGroups = gpuMatvecBench[@tagged (tagVal)]
+
+        for (lvlVal, benchVal) in gpuMatvecBenchGroups
+
+            gpuMedianVal = median(benchVal[ tagVal ]);
+            gpuMedianTimeVal = gpuMedianVal.time;
+
+            serialMedianVal = median( bestSerialMATVECBench[lvlVal][serialTagVal] )
+            serialMedianTimeVal = serialMedianVal.time;
+
+            speedupVal = serialMedianTimeVal / gpuMedianTimeVal;
+            perfVals[ lvlVal ] = speedupVal;
+
+        end
+
+        plot( lvlVals, perfVals, label = tagVal, "-o" )
+    end
+
+    legend()
+    xlabel("Levels")
+    ylabel("Speedup")
+    figname = "Plots/GPUMATVECGridScaling.png";
+    savefig( figname );
+
+end
+
 function getIndexTuple( dxn, qnodes_per_element, eid )
 
     if dxn == 1
@@ -226,7 +345,11 @@ function getInitializerTuple( dxn, qnodes_per_element, nElements )
 
 end
 
-function initializeGPUArrays( qnodes_per_element, nElements, Qr, Qs, Qt, wg, geoFacs, float_type, nnodes, dxn )
+function getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, float_type, dxn )
+
+    nnodes = size( gridDataVal.allnodes, 2 );
+    nElements = size( gridDataVal.loc2glb, 2 );
+    qnodes_per_element = refelVal.Nqp
 
     initTuple = getInitializerTuple( dxn, qnodes_per_element, nElements )
 
@@ -271,9 +394,16 @@ function initializeGPUArrays( qnodes_per_element, nElements, Qr, Qs, Qt, wg, geo
     Qt_d = CuArray( refelVal.Qt )
     wg_d = CuArray( refelVal.wg )
 
+    allnodes_d = CuArray( gridDataVal.allnodes )
+    loc2glb_d = CuArray( gridDataVal.loc2glb )
+    fValsRHS_d = CuArray( fValsRHS )
+    nodebid_d = CuArray( gridDataVal.nodebid )
+    detJ_d = CuArray( geoFacs.detJ )
+
     solutionValuesMATVEC = CuArray( zeros( configObj.float_type, nnodes ) );
 
-    return (rx_d, ry_d, rz_d, tx_d, ty_d, tz_d, sx_d, sy_d, sz_d, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC)
+    return (allnodes_d, loc2glb_d, fValsRHS_d, nodebid_d, nnodes, nElements, detJ_d, rx_d, ry_d, rz_d, 
+    sx_d, sy_d, sz_d, tx_d, ty_d, tz_d, refelVal.Nqp, refelVal.Np, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC)
 end
 
 function testGPUMATVEC( fileVal, configObj )
@@ -282,34 +412,23 @@ function testGPUMATVEC( fileVal, configObj )
     
     matVals, globalVec = createGlobalMatrix(Float32[0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
 
-    allnodes_d = CuArray( gridDataVal.allnodes )
-    loc2glb_d = CuArray( gridDataVal.loc2glb )
-    fValsRHS_d = CuArray( fValsRHS )
-    nodebid_d = CuArray( gridDataVal.nodebid )
-    detJ_d = CuArray( geoFacs.detJ )
-
-    nnodes = size( gridDataVal.allnodes, 2 );
-    nElements = size( gridDataVal.loc2glb, 2 );
-    qnodes_per_element = refelVal.Nqp
-
     dxn = 2
     
-    (rx_d, ry_d, rz_d, tx_d, ty_d, tz_d, sx_d, sy_d, sz_d, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC) = 
-        initializeGPUArrays( qnodes_per_element, nElements, refelVal.Qr, refelVal.Qs, refelVal.Qt, refelVal.wg,
-        geoFacs, configObj.float_type, nnodes, dxn )
+    gpuVersionParams = getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, dxn )
+
+    nElements = size( gridDataVal.loc2glb, 2 );
 
     numthreads = 256
     numblocks = ceil(Int, nElements / numthreads )
 
     CUDA.@sync begin
-        @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version2( allnodes_d, loc2glb_d, fValsRHS_d, 
-        nodebid_d, nnodes, nElements, detJ_d, rx_d, ry_d, rz_d, sx_d, sy_d, sz_d, tx_d, ty_d, tz_d, refelVal.Nqp, refelVal.Np,
-        Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC );
+        @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version2( gpuVersionParams... );
     end
     
     ### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
     solutionValuesMatMul = matVals * fValsRHS;
 
+    solutionValuesMATVEC = gpuVersionParams[ end ]
     cpuSolutionValues = Array( solutionValuesMATVEC );
 
     filename = "saveValsMatMul.txt";
@@ -346,11 +465,15 @@ end
 LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) ), A, B);        
 
 # checkConvergence( gmshFolderName, configObj )
-Adapt.@adapt_structure JacobianDevice
+# Adapt.@adapt_structure JacobianDevice
 
-gmshFileName = gmshFolderName * "regularMesh3D_lvl2.msh";
-fileVal = open( gmshFileName )
-testGPUMATVEC( fileVal, configObj )
+# gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
+# fileVal = open( gmshFileName )
+
+# testGPUMATVEC( fileVal, configObj )
 # profileMATVEC( fileVal, configObj )
+# matvecBench = BenchmarkGroup()
+# profileGPUMATVEC( fileVal, configObj, matvecBench )
 
+gpuMATVECGridScaling( gmshFolderName, configObj )
 # serialMATVECScaling( gmshFolderName, configObj )
