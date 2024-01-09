@@ -122,22 +122,22 @@ struct Jacobian{T<:AbstractFloat}
     tz::Vector{T}
 end
 
-struct JacobianDevice
-    rx_d::CuArray
-    ry_d::CuArray
-    rz_d::CuArray
-    sx_d::CuArray
-    sy_d::CuArray
-    sz_d::CuArray
-    tx_d::CuArray
-    ty_d::CuArray
-    tz_d::CuArray
+# struct JacobianDevice
+#     rx_d::CuArray
+#     ry_d::CuArray
+#     rz_d::CuArray
+#     sx_d::CuArray
+#     sy_d::CuArray
+#     sz_d::CuArray
+#     tx_d::CuArray
+#     ty_d::CuArray
+#     tz_d::CuArray
 
-    JacobianDevice( rx, ry, rz, sx, sy, sz, tx, ty, tz ) = 
-    ( new( CuArray( rx ), CuArray( ry ), CuArray( rz ), CuArray( sx ), CuArray( sy ), CuArray( sz ), 
-        CuArray( tx ), CuArray( ty ), CuArray( tz ) );
-    )
-end
+#     JacobianDevice( rx, ry, rz, sx, sy, sz, tx, ty, tz ) = 
+#     ( new( CuArray( rx ), CuArray( ry ), CuArray( rz ), CuArray( sx ), CuArray( sy ), CuArray( sz ), 
+#         CuArray( tx ), CuArray( ty ), CuArray( tz ) );
+#     )
+# end
 
 struct GeometricFactors{T<:AbstractFloat}
     J::Vector{Jacobian{T}}        # Jacobian for each element

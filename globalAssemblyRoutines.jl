@@ -1,4 +1,4 @@
-function apply_boundary_conditions_elemental(var::Vector{FT}, eid::Int, grid::Grid, refel::Refel,
+function apply_boundary_conditions_elemental(eid::Int, grid::Grid, refel::Refel,
     geo_facs::GeometricFactors, elmat::Matrix{FT}, elvec::Vector{FT} ) where FT<:AbstractFloat
 
     # Check each node to see if the bid is > 0 (on boundary)
@@ -23,7 +23,7 @@ function apply_boundary_conditions_elemental(var::Vector{FT}, eid::Int, grid::Gr
 end
 
 ###########Global Matrix Creation for testing purposes to check MATVEC is correct
-function createGlobalMatrix(var::Vector{FT}, mesh::Grid, refel::Refel, geometric_factors::GeometricFactors, config::FinchConfig ) where FT<:AbstractFloat
+function createGlobalMatrix( mesh::Grid, refel::Refel, geometric_factors::GeometricFactors, config::FinchConfig ) where FT<:AbstractFloat
     
     # User specified data types for int and float
     # int type is Int64
@@ -141,7 +141,7 @@ function createGlobalMatrix(var::Vector{FT}, mesh::Grid, refel::Refel, geometric
 
         #= No face loop needed. =#
         #= Apply boundary conditions. =#
-        apply_boundary_conditions_elemental(var, eid, mesh, refel, geometric_factors, element_matrix, element_vector )
+        apply_boundary_conditions_elemental(eid, mesh, refel, geometric_factors, element_matrix, element_vector )
         #= Place elemental parts in global system. =#
         next_ind = (1 + ((eid - 1) * nodes_per_element * nodes_per_element))
         for ni = 1:nodes_per_element

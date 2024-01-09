@@ -199,7 +199,7 @@ function build_geometric_factors(config, refel, grid::Grid; do_face_detj::Bool=t
                     face_type = 3;
                 end
             end
-            face_refel = build_refel(dim-1, order, face_faces, finch_state.config.elemental_nodes);
+            face_refel = build_refel(config.float_type, dim-1, order, face_faces, config.elemental_nodes);
             face_detj = zeros(ftype, totalfaces);
             for fi=1:totalfaces
                 xf = grid.allnodes[:,grid.face2glb[:,1,fi]];

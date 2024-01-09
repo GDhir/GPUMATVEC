@@ -17,7 +17,6 @@ using IterativeSolvers
 using Test
 using PyPlot
 using LaTeXStrings
-using CUDA
 using Adapt
 using StaticArrays
 using BenchmarkTools
@@ -41,7 +40,7 @@ end
 
 function testFullComputation( A, fValsRHS  )
 
-    U = gmres( A, fValsRHS; reltol = 1e-14, verbose = true )
+    U = gmres( A, fValsRHS; reltol = globalFloatType( 1e-14 ), verbose = true, restart = 1000 )
 
     return U;
 
@@ -51,10 +50,10 @@ function checkConvergence( gmshFolderName, configObj )
 
     meshvals = readdir( gmshFolderName, join = true )
 
-    errorValsL2 = Array{globalFloatType}(undef, size( meshvals, 1 ));
-    errorValsLinf = Array{globalFloatType}(undef, size( meshvals, 1 ));
-    numNodeVals = Array{globalFloatType}(undef, size( meshvals, 1 ));
-    hVals = Array{globalFloatType}(undef, size( meshvals, 1 ));
+    errorValsL2 = Array{configObj.float_type}(undef, size( meshvals, 1 ));
+    errorValsLinf = Array{configObj.float_type}(undef, size( meshvals, 1 ));
+    numNodeVals = Array{configObj.float_type}(undef, size( meshvals, 1 ));
+    hVals = Array{configObj.float_type}(undef, size( meshvals, 1 ));
 
     for (index, meshval) in enumerate(meshvals)
 
@@ -97,11 +96,15 @@ function checkConvergence( gmshFolderName, configObj )
     loglog( numNodeVals, errorValsL2[:], label = L"L^2" * " Error" )
     loglog( numNodeVals, hVals[:], label = L"h^2" )
     legend()
+    figname = "Plots/SerialMATVECConvergenceL2.png";
+    savefig( figname );
 
     figure(2)
     loglog( numNodeVals, errorValsLinf[:], label = L"L_{\infty}" * " Error" )
     loglog( numNodeVals, hVals[:], label = L"h^2" )
     legend()
+    figname = "Plots/SerialMATVECConvergenceLinf.png";
+    savefig( figname );
     
 end
 
@@ -109,7 +112,7 @@ function testMATVEC( fileVal, configObj )
 
     gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
     
-    matVals, globalVec = createGlobalMatrix([0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
+    matVals, globalVec = createGlobalMatrix(gridDataVal, refelVal, geoFacs, configObj ) 
 
     ### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
     solutionValuesMATVEC = performMATVEC_version3( configObj.float_type, gridDataVal.allnodes, gridDataVal.loc2glb, fValsRHS,
@@ -257,7 +260,7 @@ function profileGPUMATVEC( fileVal, configObj, matvecBench )
 
 end
 
-function gpuMATVECGridScaling( gmshFolderName, configObj )
+function gpuMATVECGridScaling( gmshFolderName, configObj, figname )
 
     meshVals = readdir( gmshFolderName, join = true )
 
@@ -268,7 +271,7 @@ function gpuMATVECGridScaling( gmshFolderName, configObj )
     lvlVals = zeros( length( meshVals ) )
     perfVals = zeros( length( meshVals ) )
 
-    for (meshIdx, meshVal) in enumerate( meshVals[1:3] )
+    for (meshIdx, meshVal) in enumerate( meshVals )
         val = match( r"lvl", meshVal )
 
         if !isnothing( val )
@@ -314,7 +317,6 @@ function gpuMATVECGridScaling( gmshFolderName, configObj )
     legend()
     xlabel("Levels")
     ylabel("Speedup")
-    figname = "Plots/GPUMATVECGridScaling.png";
     savefig( figname );
 
 end
@@ -410,7 +412,7 @@ function testGPUMATVEC( fileVal, configObj )
 
     gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
     
-    matVals, globalVec = createGlobalMatrix(Float32[0.2, 0.3], gridDataVal, refelVal, geoFacs, configObj ) 
+    matVals, globalVec = createGlobalMatrix( gridDataVal, refelVal, geoFacs, configObj ) 
 
     dxn = 2
     
@@ -431,12 +433,12 @@ function testGPUMATVEC( fileVal, configObj )
     solutionValuesMATVEC = gpuVersionParams[ end ]
     cpuSolutionValues = Array( solutionValuesMATVEC );
 
-    filename = "saveValsMatMul.txt";
+    filename = "saveValsMatMulTet.txt";
     fileval1 = open( filename, "w" );
     println( fileval1, solutionValuesMatMul )
     close(fileval1)
 
-    filename = "saveValsMatVec.txt";
+    filename = "saveValsMatVecTet.txt";
     fileval2 = open( filename, "w" );
     println( fileval2, cpuSolutionValues )
     close(fileval2)
@@ -452,7 +454,7 @@ Base.eltype(A::SizedStrangMatrix) = globalFloatType;
 Base.size(A::SizedStrangMatrix) = A.size;
 Base.size(A::SizedStrangMatrix,i::Int) = A.size[i];
 
-gmshFolderName = "/home/gaurav/CS6958/Project/Code/Mesh3D/";
+gmshFolderName = "/home/gaurav/CS6958/Project/Code/Mesh3D/TetMesh3D/";
 
 configObj = FinchConfig();
 
@@ -467,13 +469,15 @@ LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) 
 # checkConvergence( gmshFolderName, configObj )
 # Adapt.@adapt_structure JacobianDevice
 
-# gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
+# gmshFileName = gmshFolderName * "tetMesh3D_lvl0.msh";
 # fileVal = open( gmshFileName )
+# testMATVEC( fileVal, configObj )
 
 # testGPUMATVEC( fileVal, configObj )
 # profileMATVEC( fileVal, configObj )
 # matvecBench = BenchmarkGroup()
 # profileGPUMATVEC( fileVal, configObj, matvecBench )
 
-gpuMATVECGridScaling( gmshFolderName, configObj )
+figname = "Plots/GPUMATVECGridScaling_TetMesh3D.png";
+gpuMATVECGridScaling( gmshFolderName, configObj, figname )
 # serialMATVECScaling( gmshFolderName, configObj )

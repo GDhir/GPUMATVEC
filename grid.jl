@@ -163,11 +163,11 @@ function grid_from_mesh(mesh::MeshData, config; grid_type=CG, order=1, mixed=fal
         # log_entry("Building $(npairs) reference elements: $(dim)-D, (el_type, order) = "*string(etype_order_pairs), 2);
         refels::Vector{Refel} = [];
         for i=1:npairs
-            push!(refels, build_refel(dim, etype_order_pairs[i][2], etypetonf[etype_order_pairs[i][1]], config.elemental_nodes));
+            push!(refels, build_refel(config.float_type, dim, etype_order_pairs[i][2], etypetonf[etype_order_pairs[i][1]], config.elemental_nodes));
         end
     else # one element type
         # log_entry("Building reference element: "*string(dim)*"D, order="*string(order)*", nfaces="*string(nfaces), 2);
-        refel::Refel = build_refel(dim, order, nfaces, config.elemental_nodes);
+        refel::Refel = build_refel(config.float_type, dim, order, nfaces, config.elemental_nodes);
     end
     
     if grid_type == DG

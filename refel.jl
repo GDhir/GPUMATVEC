@@ -15,7 +15,7 @@ using LinearAlgebra
 
 import Base.copy
 function copy(ref::Refel)
-    T = Float64;
+    T = globalFloatType;
     newref = Refel(T, ref.dim, ref.N, ref.Np, ref.Nfaces, ref.Nfp);
     newref.Nqp = ref.Nqp;
     newref.r1d = copy(ref.r1d);
@@ -48,7 +48,7 @@ function copy(ref::Refel)
     return newref;
 end
 
-function build_refel(dimension, order, nfaces, nodetype)
+function build_refel(float_type, dimension, order, nfaces, nodetype)
     # Check for errors
     if (dimension == 1 && nfaces != 2) || (dimension > 1 && nfaces < dimension+1)
         println("Error: buildRefel(dimension, order, nfaces, nodetype), check for valid parameters.");
@@ -87,7 +87,7 @@ function build_refel(dimension, order, nfaces, nodetype)
         # TODO
     end
     
-    refel = Refel( Float64, dimension, order, Np, nfaces, Nfp);
+    refel = Refel( float_type, dimension, order, Np, nfaces, Nfp);
     
     # Get nodes on the reference element
     refel_nodes!(refel, nodetype);
@@ -130,10 +130,10 @@ function build_refel(dimension, order, nfaces, nodetype)
         refel.Vg = zeros(order+1, order+1);
         refel.gradVg = zeros(order+1, order+1);
         # surface versions
-        refel.surf_V = Array{Array{Float64}}(undef, nfaces);
-        refel.surf_gradV = Array{Array{Float64}}(undef, nfaces);
-        refel.surf_Vg = Array{Array{Float64}}(undef, nfaces);
-        refel.surf_gradVg = Array{Array{Float64}}(undef, nfaces);
+        refel.surf_V = Array{Array{float_type}}(undef, nfaces);
+        refel.surf_gradV = Array{Array{float_type}}(undef, nfaces);
+        refel.surf_Vg = Array{Array{float_type}}(undef, nfaces);
+        refel.surf_gradVg = Array{Array{float_type}}(undef, nfaces);
         for fi = 1:nfaces
             refel.surf_V[fi] = zeros(refel.Nfp[fi], Np);
             refel.surf_gradV[fi] = zeros(refel.Nfp[fi], Np);
@@ -203,11 +203,11 @@ function build_refel(dimension, order, nfaces, nodetype)
             refel.Ddr = kron(ident, refel.Dr);
             refel.Dds = kron(refel.Dr, ident);
             # surface
-            refel.surf_Q = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Qr = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Qs = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Ddr = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Dds = Array{Array{Float64}}(undef, nfaces);
+            refel.surf_Q = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Qr = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Qs = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Ddr = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Dds = Array{Array{float_type}}(undef, nfaces);
             ## Surfaces will use the full matrices rather than using tensor products
             fullinvV = kron(refel.invV, refel.invV);
 
@@ -376,13 +376,13 @@ function build_refel(dimension, order, nfaces, nodetype)
             refel.Ddt = kron(kron(refel.Dg, ident), ident);
             
             # surface
-            refel.surf_Q = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Qr = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Qs = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Qt = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Ddr = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Dds = Array{Array{Float64}}(undef, nfaces);
-            refel.surf_Ddt = Array{Array{Float64}}(undef, nfaces);
+            refel.surf_Q = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Qr = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Qs = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Qt = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Ddr = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Dds = Array{Array{float_type}}(undef, nfaces);
+            refel.surf_Ddt = Array{Array{float_type}}(undef, nfaces);
             ## Surfaces will use the full matrices rather than using tensor products
             fullinvV = kron(refel.invV, kron(refel.invV, refel.invV));
             
