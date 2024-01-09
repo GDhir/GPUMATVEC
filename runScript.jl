@@ -46,7 +46,7 @@ function testFullComputation( A, fValsRHS  )
 
 end
 
-function checkConvergence( gmshFolderName, configObj )
+function checkConvergence( gmshFolderName, configObj, orderVal = 1, filenamePrefix = "SerialMATVECConvergence" )
 
     meshvals = readdir( gmshFolderName, join = true )
 
@@ -69,7 +69,7 @@ function checkConvergence( gmshFolderName, configObj )
         fileVal = open( meshval, "r" );
         println(meshval)
 
-        gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+        gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal, orderVal );
         nnodes = size( gridDataVal.allnodes, 2 );
 
         numNodeVals[index] = nnodes;
@@ -88,29 +88,29 @@ function checkConvergence( gmshFolderName, configObj )
         errorValsL2[index] = solutionErrorL2;
         errorValsLinf[index] = solutionErrorLinf;
 
-        hVals[index] = 1/(nnodes^(2/3));
+        hVals[index] = 1/(nnodes^(orderVal/3));
 
     end
 
     figure(1)
-    loglog( numNodeVals, errorValsL2[:], label = L"L^2" * " Error" )
-    loglog( numNodeVals, hVals[:], label = L"h^2" )
+    loglog( numNodeVals, errorValsL2[:], "-o", label = L"L^2" * " Error" )
+    loglog( numNodeVals, hVals[:], "-o", label = L"h^" * string(orderVal) )
     legend()
-    figname = "Plots/SerialMATVECConvergenceL2.png";
+    figname = "Plots/" * filenamePrefix * "L2.png";
     savefig( figname );
 
     figure(2)
-    loglog( numNodeVals, errorValsLinf[:], label = L"L_{\infty}" * " Error" )
-    loglog( numNodeVals, hVals[:], label = L"h^2" )
+    loglog( numNodeVals, errorValsLinf[:], "-o", label = L"L_{\infty}" * " Error" )
+    loglog( numNodeVals, hVals[:], "-o", label = L"h^" * string(orderVal) )
     legend()
-    figname = "Plots/SerialMATVECConvergenceLinf.png";
+    figname = "Plots/" * filenamePrefix * "Linf.png";
     savefig( figname );
     
 end
 
-function testMATVEC( fileVal, configObj )
+function testMATVEC( fileVal, configObj, orderVal = 1 )
 
-    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal, orderVal );
     
     matVals, globalVec = createGlobalMatrix(gridDataVal, refelVal, geoFacs, configObj ) 
 
@@ -466,18 +466,20 @@ end
 
 LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) ), A, B);        
 
-# checkConvergence( gmshFolderName, configObj )
+orderVal = 2
+filenamePrefix = "SerialMATVECConvergenceTetMeshOrder=" * string( orderVal ); 
+checkConvergence( gmshFolderName, configObj, orderVal, filenamePrefix )
 # Adapt.@adapt_structure JacobianDevice
 
 # gmshFileName = gmshFolderName * "tetMesh3D_lvl0.msh";
 # fileVal = open( gmshFileName )
-# testMATVEC( fileVal, configObj )
+# testMATVEC( fileVal, configObj, 2 )
 
 # testGPUMATVEC( fileVal, configObj )
 # profileMATVEC( fileVal, configObj )
 # matvecBench = BenchmarkGroup()
 # profileGPUMATVEC( fileVal, configObj, matvecBench )
 
-figname = "Plots/GPUMATVECGridScaling_TetMesh3D.png";
-gpuMATVECGridScaling( gmshFolderName, configObj, figname )
+# figname = "Plots/GPUMATVECGridScaling_TetMesh3D.png";
+# gpuMATVECGridScaling( gmshFolderName, configObj, figname )
 # serialMATVECScaling( gmshFolderName, configObj )

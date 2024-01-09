@@ -1,7 +1,7 @@
-function getParameters( configObj, fileVal )
+function getParameters( configObj, fileVal, orderVal = 1 )
 
     meshDataVal = read_mesh( fileVal );
-    global refelVal, gridDataVal = grid_from_mesh( meshDataVal, configObj );
+    global refelVal, gridDataVal = grid_from_mesh( meshDataVal, configObj, order = orderVal );
     nnodes = size( gridDataVal.allnodes, 2 );
 
     global geoFacs = build_geometric_factors( configObj, refelVal, gridDataVal, do_face_detj = false, 
