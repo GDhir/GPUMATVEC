@@ -1,8 +1,8 @@
 ## GPU MATVEC implementation with fused loops (GPU version 1)
 # Takes less per thread memory but very slightly more without fused loops 
-function performGPUMATVEC_version1( allnodes, loc2glb, uvals, nodebid, nnodes, nElements, detJ, 
+function performGPUMATVEC_version1( allnodes, loc2glb, nodebid, nnodes, nElements, detJ, 
     rx, ry, rz, sx, sy, sz, tx, ty, tz, qnodes_per_element, nodes_per_element, Qr, Qs, 
-    Qt, wg, solutionVals )
+    Qt, wg, solutionVals, uvals )
 
     eid = (blockIdx().x - 1) * blockDim().x + threadIdx().x;
     ## All directions MATVEC Product in one loop
@@ -52,9 +52,9 @@ end
 
 ## GPU MATVEC implementation with fused loops (GPU version 2)
 # Checking any performance updates on index reversal for coalescing
-function performGPUMATVEC_version2( allnodes, loc2glb, uvals, nodebid, nnodes, nElements, detJ, 
+function performGPUMATVEC_version2( allnodes, loc2glb, nodebid, nnodes, nElements, detJ, 
     rx, ry, rz, sx, sy, sz, tx, ty, tz, qnodes_per_element, nodes_per_element, Qr, Qs, 
-    Qt, wg, solutionVals )
+    Qt, wg, solutionVals, uvals )
 
     eid = (blockIdx().x - 1) * blockDim().x + threadIdx().x;
     ## All directions MATVEC Product in one loop

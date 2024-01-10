@@ -23,7 +23,7 @@ using BenchmarkTools
 # using BenchmarkPlots
 # using StatsPlots
 
-globalFloatType = Float32;
+global globalFloatType = Float32;
 
 function initFunction(x::Union{FT,FT},y::Union{FT,FT},z::Union{FT,FT}) where FT<:AbstractFloat
     return 1.0; 
@@ -40,13 +40,13 @@ end
 
 function testFullComputation( A, fValsRHS  )
 
-    U = gmres( A, fValsRHS; reltol = globalFloatType( 1e-14 ), verbose = true, restart = 1000 )
+    U = gmres( A, fValsRHS; reltol = globalFloatType( 1e-13 ), verbose = true, restart = 100 )
 
     return U;
 
 end
 
-function checkConvergence( gmshFolderName, configObj, orderVal = 1, filenamePrefix = "SerialMATVECConvergence" )
+function checkSerialConvergence( gmshFolderName, configObj, orderVal = 1, filenamePrefix = "SerialMATVECConvergence" )
 
     meshvals = readdir( gmshFolderName, join = true )
 
@@ -54,6 +54,71 @@ function checkConvergence( gmshFolderName, configObj, orderVal = 1, filenamePref
     errorValsLinf = Array{configObj.float_type}(undef, size( meshvals, 1 ));
     numNodeVals = Array{configObj.float_type}(undef, size( meshvals, 1 ));
     hVals = Array{configObj.float_type}(undef, size( meshvals, 1 ));
+    errorOrderVal = orderVal + 1;
+
+    for (index, meshval) in enumerate(meshvals)
+
+        val = match( r"lvl", meshval )
+
+        if !isnothing( val )
+            lvlstr =  match( r"lvl", meshval )
+            lvloffset = lvlstr.offset + 3
+            lvlval = match( r"[0-9]+", meshval[ lvloffset:end ] )
+            lvlval = lvlval.match
+        end
+
+        fileVal = open( meshval, "r" );
+        println(meshval)
+
+        gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal, orderVal );
+
+        nnodes = size( gridDataVal.allnodes, 2 );
+
+        numNodeVals[index] = nnodes;
+        A = SerialMATVECMatrix((length( fValsRHS ),length( fValsRHS ) ) );
+        U = testFullComputation( A, fValsRHS );
+        
+        ### Residual Error test
+        @test isapprox( A* U, fValsRHS, atol = 1e-6 )
+
+        ### Solution Error to check correct solution and convergence
+        solutionErrorVec = U - exactvals;
+        solutionErrorL2 = norm( solutionErrorVec, 2 );
+        solutionErrorL2 = sqrt( (solutionErrorL2 ^ 2 ) / nnodes );
+        solutionErrorLinf = norm( solutionErrorVec, Inf );
+
+        errorValsL2[index] = solutionErrorL2;
+        errorValsLinf[index] = solutionErrorLinf;
+
+        hVals[index] = 1/(nnodes^(errorOrderVal/3));
+
+    end
+
+    figure(1)
+    loglog( numNodeVals, errorValsL2[:], "-o", label = L"L^2" * " Error" )
+    loglog( numNodeVals, hVals[:], "-o", label = L"h^{%$errorOrderVal}" )
+    legend()
+    figname = "Plots/" * filenamePrefix * "L2.png";
+    savefig( figname );
+
+    figure(2)
+    loglog( numNodeVals, errorValsLinf[:], "-o", label = L"L_{\infty}" * " Error" )
+    loglog( numNodeVals, hVals[:], "-o", label = L"h^{%$errorOrderVal}" )
+    legend()
+    figname = "Plots/" * filenamePrefix * "Linf.png";
+    savefig( figname );
+    
+end
+
+function checkGPUConvergence( gmshFolderName, configObj, orderVal = 1, filenamePrefix = "GPUMATVECConvergence" )
+
+    meshvals = readdir( gmshFolderName, join = true )
+
+    errorValsL2 = Array{configObj.float_type}(undef, size( meshvals, 1 ));
+    errorValsLinf = Array{configObj.float_type}(undef, size( meshvals, 1 ));
+    numNodeVals = Array{configObj.float_type}(undef, size( meshvals, 1 ));
+    hVals = Array{configObj.float_type}(undef, size( meshvals, 1 ));
+    errorOrderVal = orderVal + 1
 
     for (index, meshval) in enumerate(meshvals)
 
@@ -72,8 +137,16 @@ function checkConvergence( gmshFolderName, configObj, orderVal = 1, filenamePref
         gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal, orderVal );
         nnodes = size( gridDataVal.allnodes, 2 );
 
+        dxn = 1;
+        
+        global gpuParamVals = getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, dxn );
+
         numNodeVals[index] = nnodes;
-        A = SizedStrangMatrix((length( fValsRHS ),length( fValsRHS ) ) );
+        A = GPUMATVECMatrix((length( fValsRHS ),length( fValsRHS ) ));
+
+        nElements = size( gridDataVal.loc2glb, 2 );
+        global numthreads = 256;
+        global numblocks = ceil(Int, nElements / numthreads );
         U = testFullComputation( A, fValsRHS );
         
         ### Residual Error test
@@ -88,20 +161,20 @@ function checkConvergence( gmshFolderName, configObj, orderVal = 1, filenamePref
         errorValsL2[index] = solutionErrorL2;
         errorValsLinf[index] = solutionErrorLinf;
 
-        hVals[index] = 1/(nnodes^(orderVal/3));
+        hVals[index] = 1/(nnodes^(errorOrderVal/3));
 
     end
 
     figure(1)
     loglog( numNodeVals, errorValsL2[:], "-o", label = L"L^2" * " Error" )
-    loglog( numNodeVals, hVals[:], "-o", label = L"h^" * string(orderVal) )
+    loglog( numNodeVals, hVals[:], "-o", label = L"h^{%$errorOrderVal}" )
     legend()
     figname = "Plots/" * filenamePrefix * "L2.png";
     savefig( figname );
 
     figure(2)
     loglog( numNodeVals, errorValsLinf[:], "-o", label = L"L_{\infty}" * " Error" )
-    loglog( numNodeVals, hVals[:], "-o", label = L"h^" * string(orderVal) )
+    loglog( numNodeVals, hVals[:], "-o", label = L"h^{%$errorOrderVal}" )
     legend()
     figname = "Plots/" * filenamePrefix * "Linf.png";
     savefig( figname );
@@ -404,8 +477,8 @@ function getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, float_ty
 
     solutionValuesMATVEC = CuArray( zeros( configObj.float_type, nnodes ) );
 
-    return (allnodes_d, loc2glb_d, fValsRHS_d, nodebid_d, nnodes, nElements, detJ_d, rx_d, ry_d, rz_d, 
-    sx_d, sy_d, sz_d, tx_d, ty_d, tz_d, refelVal.Nqp, refelVal.Np, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC)
+    return (allnodes_d, loc2glb_d, nodebid_d, nnodes, nElements, detJ_d, rx_d, ry_d, rz_d, 
+    sx_d, sy_d, sz_d, tx_d, ty_d, tz_d, refelVal.Nqp, refelVal.Np, Qr_d, Qs_d, Qt_d, wg_d, solutionValuesMATVEC, fValsRHS_d)
 end
 
 function testGPUMATVEC( fileVal, configObj )
@@ -430,7 +503,7 @@ function testGPUMATVEC( fileVal, configObj )
     ### Global Matrix-Vector multiply versus Sparse MATVEC Product Test
     solutionValuesMatMul = matVals * fValsRHS;
 
-    solutionValuesMATVEC = gpuVersionParams[ end ]
+    solutionValuesMATVEC = gpuVersionParams[ end - 1 ]
     cpuSolutionValues = Array( solutionValuesMATVEC );
 
     filename = "saveValsMatMulTet.txt";
@@ -446,33 +519,48 @@ function testGPUMATVEC( fileVal, configObj )
 
 end
 
-struct SizedStrangMatrix
+struct SerialMATVECMatrix
     size::Tuple{Int,Int}
 end
 
-Base.eltype(A::SizedStrangMatrix) = globalFloatType;
-Base.size(A::SizedStrangMatrix) = A.size;
-Base.size(A::SizedStrangMatrix,i::Int) = A.size[i];
+struct GPUMATVECMatrix
+    size::Tuple{Int,Int}
+end
+
+Base.eltype(A::SerialMATVECMatrix) = globalFloatType;
+Base.size(A::SerialMATVECMatrix) = A.size;
+Base.size(A::SerialMATVECMatrix,i::Int) = A.size[i];
+
+function mul!( C,A::SerialMATVECMatrix,B )
+    C[:] = performMATVEC( configObj, geoFacs, refelVal, gridDataVal, B )
+end
+
+Base.eltype(A::GPUMATVECMatrix) = globalFloatType;
+Base.size(A::GPUMATVECMatrix) = A.size;
+Base.size(A::GPUMATVECMatrix,i::Int) = A.size[i];
+
+function mul!( C, A::GPUMATVECMatrix, B )
+    solutionVals = CuArray( zeros( globalFloatType, gpuParamVals[4] ) );
+    rhsVals = CuArray( B );
+    @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version1( gpuParamVals[1: end - 2]..., solutionVals, rhsVals );
+    
+    C[:] = Array( solutionVals );
+end
 
 gmshFolderName = "/home/gaurav/CS6958/Project/Code/Mesh3D/TetMesh3D/";
 
 configObj = FinchConfig();
 
-function mul!( C,A::SizedStrangMatrix,B )
-    C[:] = performMATVEC_version3( configObj.float_type, gridDataVal.allnodes, gridDataVal.loc2glb, B,
-     gridDataVal.nodebid, geoFacs.detJ, geoFacs.J, refelVal.Nqp, refelVal.Np, 
-     refelVal.Qr, refelVal.Qs, refelVal.Qt, refelVal.wg );
-end
+LinearAlgebra.:*(A::SerialMATVECMatrix,B::AbstractVector) = mul!(ones( length(B) ), A, B);        
+LinearAlgebra.:*(A::GPUMATVECMatrix, B::AbstractVector) = mul!(ones( length(B) ), A, B);        
 
-LinearAlgebra.:*(A::SizedStrangMatrix,B::AbstractVector) = mul!(ones( length(B) ), A, B);        
-
-orderVal = 2
-filenamePrefix = "SerialMATVECConvergenceTetMeshOrder=" * string( orderVal ); 
-checkConvergence( gmshFolderName, configObj, orderVal, filenamePrefix )
+orderVal = 1
+filenamePrefix = "GPUMATVECConvergenceTetMeshOrder=" * string( orderVal ); 
+checkGPUConvergence( gmshFolderName, configObj, orderVal, filenamePrefix )
 # Adapt.@adapt_structure JacobianDevice
 
-# gmshFileName = gmshFolderName * "tetMesh3D_lvl0.msh";
-# fileVal = open( gmshFileName )
+gmshFileName = gmshFolderName * "tetMesh3D_lvl0.msh";
+fileVal = open( gmshFileName )
 # testMATVEC( fileVal, configObj, 2 )
 
 # testGPUMATVEC( fileVal, configObj )
