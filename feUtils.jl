@@ -1,8 +1,15 @@
-function getParameters( configObj, fileVal, orderVal = 1 )
+function getGridParameters( configObj, fileVal, orderVal = 1 )
 
     meshDataVal = read_mesh( fileVal );
     global refelVal, gridDataVal = grid_from_mesh( meshDataVal, configObj, order = orderVal );
     nnodes = size( gridDataVal.allnodes, 2 );
+
+    return [refelVal, gridDataVal, nnodes ]
+end
+
+function getParameters( configObj, fileVal, orderVal = 1 )
+
+    refelVal, gridDataVal, nnodes = getGridParameters( configObj, fileVal, orderVal )
 
     global geoFacs = build_geometric_factors( configObj, refelVal, gridDataVal, do_face_detj = false, 
         do_vol_area = false, constant_jacobian = false );

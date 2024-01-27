@@ -92,8 +92,30 @@ function getElementNodeIndices( gmshfilename )
     return elementMat
 end
 
+function getNumNodes( gmshfilename )
 
+    fileVal = open( gmshfilename, "r" )
 
-gmshfilename = "MeshRun/regularMesh_lvl0.msh"
+    idxStart = 0
+    idxEnd = 0
 
-getAllNodes( gmshfilename )
+    numNodes = 0
+    while !eof( fileVal )
+
+        lineval = readline( fileVal )
+
+        if lineval == "\$Nodes"
+            nodeLineVal = readline( fileVal )
+            numNodes = parse( Int64, nodeLineVal )
+            break
+        end
+    end
+
+    return numNodes
+
+end
+
+# gmshfilename = "MeshRun/regularMesh_lvl0.msh"
+
+vals = getNumNodes( "/home/gaurav/CS6958/Project/Code/Mesh3D/HexMesh3D/regularMesh3D_lvl0.msh" )
+# getAllNodes( gmshfilename )

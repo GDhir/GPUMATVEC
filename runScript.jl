@@ -37,7 +37,6 @@ function rhsNodalFunction(x::Union{FT,FT},y::Union{FT,FT},z::Union{FT,FT}) where
     return (3 * (pi ^ 2) * sin( pi * x * 1 ) * sin( pi * y * 1 ) * sin( pi * z * 1 )); 
 end
 
-
 function testFullComputation( A, fValsRHS  )
 
     U = gmres( A, fValsRHS; reltol = globalFloatType( 1e-13 ), verbose = true, restart = 100 )
@@ -108,6 +107,54 @@ function checkSerialConvergence( gmshFolderName, configObj, orderVal = 1, filena
     figname = "Plots/" * filenamePrefix * "Linf.png";
     savefig( figname );
     
+end
+
+function profileSerialLinearSystemSolve( fileVal, configObj, linearSystemBench, orderVal = 1, serialTagVal = "BestSerialVersion" )
+
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal, orderVal );
+
+    A = SerialMATVECMatrix((length( fValsRHS ),length( fValsRHS ) ) );
+
+    serialLinearSystemSolverParams = [ A, fValsRHS ];
+
+    linearSystemBench[ serialTagVal ] = getSerialMATVECBenchmarkGroup( serialLinearSystemSolverParams, testFullComputation ) 
+    tune!(linearSystemBench)
+    results = run(linearSystemBench, verbose = false )
+    
+    return results
+end
+
+function profileGPULinearSystemSolve( fileVal, configObj, linearSystemBench, orderVal = 1)
+
+    gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
+    
+    funcVals = [ performGPUMATVEC_version1, performGPUMATVEC_version2];
+    tagVals = [ "gpuVersion1", "gpuVersion2" ]
+
+    # paramVals = [getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, 2 ) ] 
+    # getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, 2 ) ]
+
+    nElements = size( gridDataVal.loc2glb, 2 );
+
+    numthreads = 256
+    numblocks = ceil(Int, nElements / numthreads )
+
+    for (idx, funcVal) in enumerate( funcVals )
+
+        A = GPUMATVECMatrix((length( fValsRHS ),length( fValsRHS ) ), funcVal);
+        global gpuParamVals = getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, idx );
+
+        nElements = size( gridDataVal.loc2glb, 2 );
+        global numthreads = 256;
+        global numblocks = ceil(Int, nElements / numthreads );
+
+        linearSystemBench[ tagVals[idx] ] = @benchmarkable $testFullComputation( $A, $fValsRHS );
+    end
+
+    tune!(linearSystemBench)
+    results = run(linearSystemBench, verbose = false )
+
+    return results, tagVals
 end
 
 function checkGPUConvergence( gmshFolderName, configObj, orderVal = 1, filenamePrefix = "GPUMATVECConvergence" )
@@ -525,6 +572,7 @@ end
 
 struct GPUMATVECMatrix
     size::Tuple{Int,Int}
+    funcVal
 end
 
 Base.eltype(A::SerialMATVECMatrix) = globalFloatType;
@@ -542,12 +590,16 @@ Base.size(A::GPUMATVECMatrix,i::Int) = A.size[i];
 function mul!( C, A::GPUMATVECMatrix, B )
     solutionVals = CuArray( zeros( globalFloatType, gpuParamVals[4] ) );
     rhsVals = CuArray( B );
-    @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version1( gpuParamVals[1: end - 2]..., solutionVals, rhsVals );
+    # @cuda threads = numthreads blocks = numblocks performGPUMATVEC_version1( gpuParamVals[1: end - 2]..., solutionVals, rhsVals );
     
+    CUDA.@sync begin
+        @cuda threads = numthreads blocks = numblocks A.funcVal( gpuParamVals[1: end - 2]..., solutionVals, rhsVals )
+    end
+
     C[:] = Array( solutionVals );
 end
 
-gmshFolderName = "/home/gaurav/CS6958/Project/Code/Mesh3D/TetMesh3D/";
+gmshFolderName = "/home/gaurav/CS6958/Project/Code/Mesh3D/HexMesh3D/";
 
 configObj = FinchConfig();
 
@@ -555,16 +607,27 @@ LinearAlgebra.:*(A::SerialMATVECMatrix,B::AbstractVector) = mul!(ones( length(B)
 LinearAlgebra.:*(A::GPUMATVECMatrix, B::AbstractVector) = mul!(ones( length(B) ), A, B);        
 
 orderVal = 1
-filenamePrefix = "GPUMATVECConvergenceTetMeshOrder=" * string( orderVal ); 
-checkGPUConvergence( gmshFolderName, configObj, orderVal, filenamePrefix )
+filenamePrefix = "GPUMATVECConvergenceHexMeshOrder=" * string( orderVal ); 
+# checkGPUConvergence( gmshFolderName, configObj, orderVal, filenamePrefix )
 # Adapt.@adapt_structure JacobianDevice
 
-gmshFileName = gmshFolderName * "tetMesh3D_lvl0.msh";
-fileVal = open( gmshFileName )
+gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
+# fileVal = open( gmshFileName )
 # testMATVEC( fileVal, configObj, 2 )
 
 # testGPUMATVEC( fileVal, configObj )
 # profileMATVEC( fileVal, configObj )
+# serialLinearSystemBench = BenchmarkGroup()
+# serialResults = profileSerialLinearSystemSolve( fileVal, configObj, serialLinearSystemBench )
+# close(fileVal)
+
+fileVal = open( gmshFileName )
+gpuLinearSystemBench = BenchmarkGroup()
+gpuResults = profileGPULinearSystemSolve( fileVal, configObj, gpuLinearSystemBench)
+close(fileVal)
+
+# println(serialResults)
+println(gpuResults)
 # matvecBench = BenchmarkGroup()
 # profileGPUMATVEC( fileVal, configObj, matvecBench )
 
