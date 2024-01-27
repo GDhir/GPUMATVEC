@@ -599,7 +599,7 @@ function mul!( C, A::GPUMATVECMatrix, B )
     C[:] = Array( solutionVals );
 end
 
-gmshFolderName = "/home/gaurav/CS6958/Project/Code/Mesh3D/HexMesh3D/";
+gmshFolderName = "/uufs/chpc.utah.edu/common/home/u1444601/GPUMATVEC/Code/Mesh3D/TetMesh3D/";
 
 configObj = FinchConfig();
 
@@ -607,26 +607,25 @@ LinearAlgebra.:*(A::SerialMATVECMatrix,B::AbstractVector) = mul!(ones( length(B)
 LinearAlgebra.:*(A::GPUMATVECMatrix, B::AbstractVector) = mul!(ones( length(B) ), A, B);        
 
 orderVal = 1
-filenamePrefix = "GPUMATVECConvergenceHexMeshOrder=" * string( orderVal ); 
+# filenamePrefix = "GPUMATVECConvergenceTetMeshOrder=" * string( orderVal ); 
 # checkGPUConvergence( gmshFolderName, configObj, orderVal, filenamePrefix )
 # Adapt.@adapt_structure JacobianDevice
 
-gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
-# fileVal = open( gmshFileName )
+gmshFileName = gmshFolderName * "tetMesh3D_lvl0.msh";
+fileVal = open( gmshFileName )
 # testMATVEC( fileVal, configObj, 2 )
 
 # testGPUMATVEC( fileVal, configObj )
 # profileMATVEC( fileVal, configObj )
-# serialLinearSystemBench = BenchmarkGroup()
-# serialResults = profileSerialLinearSystemSolve( fileVal, configObj, serialLinearSystemBench )
-# close(fileVal)
+matvecBench = BenchmarkGroup()
+profileGPUMATVEC( fileVal, configObj, matvecBench )
 
-fileVal = open( gmshFileName )
-gpuLinearSystemBench = BenchmarkGroup()
-gpuResults = profileGPULinearSystemSolve( fileVal, configObj, gpuLinearSystemBench)
-close(fileVal)
+matvecBenchSerial = BenchmarkGroup()
+serialResults = profileBestSerialMATVEC( fileVal, configObj, matvecBenchSerial)
+println( serialResults )
 
-# println(serialResults)
-println(gpuResults)
-# matvecBench = BenchmarkGroup()
-# profileGPUMATVEC( fileVal, configObj, matvecBench )
+figname = "Plots/GPUMATVECGridScalingSpeedup_TetMesh3D_CHPC.png";
+# gpuMATVECGridFlopScaling( gmshFolderName, configObj, figname )
+# gpuMATVECGridSpeedupScaling( gmshFolderName, configObj, figname )
+
+# serialMATVECScaling( gmshFolderName, configObj )
