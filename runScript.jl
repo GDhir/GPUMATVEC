@@ -39,7 +39,7 @@ end
 
 function testFullComputation( A, fValsRHS  )
 
-    U = gmres( A, fValsRHS; reltol = globalFloatType( 1e-13 ), verbose = true, restart = 100 )
+    U = gmres( A, fValsRHS; reltol = globalFloatType( 1e-10 ), verbose = true, restart = 100 )
 
     return U;
 
@@ -128,8 +128,11 @@ function profileGPULinearSystemSolve( fileVal, configObj, linearSystemBench, ord
 
     gridDataVal, refelVal, geoFacs, exactvals, fValsRHS = getParameters( configObj, fileVal );
     
-    funcVals = [ performGPUMATVEC_version1, performGPUMATVEC_version2];
-    tagVals = [ "gpuVersion1", "gpuVersion2" ]
+    # funcVals = [ performGPUMATVEC_version1, performGPUMATVEC_version2];
+    # tagVals = [ "gpuVersion1", "gpuVersion2" ]
+
+    funcVals = [ performGPUMATVEC_version1 ]
+    tagVals = [ "gpuVersion1" ]
 
     # paramVals = [getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, 2 ) ] 
     # getGPUVersionParams( refelVal, geoFacs, gridDataVal, fValsRHS, configObj.float_type, 2 ) ]
@@ -155,6 +158,67 @@ function profileGPULinearSystemSolve( fileVal, configObj, linearSystemBench, ord
     results = run(linearSystemBench, verbose = false )
 
     return results, tagVals
+end
+
+function gpuLinearSystemSolveScaling( gmshFolderName, configObj, figName )
+
+    meshVals = readdir( gmshFolderName, join = true )
+
+    gpuLinearSystemBench = BenchmarkGroup()
+    bestSerialLinearSystemBench = BenchmarkGroup()
+
+    tagVals = []
+    lvlVals = zeros( length( meshVals ) )
+    perfVals = zeros( length( meshVals ) )
+
+    for (meshIdx, meshVal) in enumerate( meshVals )
+        val = match( r"lvl", meshVal )
+
+        if !isnothing( val )
+            lvlStr =  match( r"lvl", meshVal )
+            lvlOffset = lvlStr.offset + 3
+            lvlVal = match( r"[0-9]+", meshVal[ lvlOffset:end ] )
+            lvlVal = parse( Int64, lvlVal.match) + 1
+        end
+
+        lvlVals[ lvlVal ] = lvlVal
+
+        fileVal = open( meshVal )
+        ( gpuLinearSystemBench[lvlVal], tagVals ) = profileGPULinearSystemSolve( fileVal, configObj, BenchmarkGroup() )
+        close(fileVal)
+
+        fileVal = open( meshVal )
+        bestSerialLinearSystemBench[lvlVal] = profileSerialLinearSystemSolve( fileVal, configObj, BenchmarkGroup() )
+        close(fileVal)
+    end
+
+    serialTagVal = "BestSerialVersion";
+    figure(1)
+
+    for tagVal in tagVals
+        gpuLSBenchGroups = gpuLinearSystemBench[@tagged (tagVal)]
+
+        for (lvlVal, benchVal) in gpuLSBenchGroups
+
+            gpuMedianVal = median(benchVal[ tagVal ]);
+            gpuMedianTimeVal = gpuMedianVal.time;
+
+            serialMedianVal = median( bestSerialLinearSystemBench[lvlVal][serialTagVal] )
+            serialMedianTimeVal = serialMedianVal.time;
+
+            speedupVal = serialMedianTimeVal / gpuMedianTimeVal;
+            perfVals[ lvlVal ] = speedupVal;
+
+        end
+
+        plot( lvlVals, perfVals, label = tagVal, "-o" )
+    end
+
+    legend()
+    xlabel("Levels")
+    ylabel("Speedup")
+    savefig( figName );
+
 end
 
 function checkGPUConvergence( gmshFolderName, configObj, orderVal = 1, filenamePrefix = "GPUMATVECConvergence" )
@@ -611,7 +675,7 @@ filenamePrefix = "GPUMATVECConvergenceHexMeshOrder=" * string( orderVal );
 # checkGPUConvergence( gmshFolderName, configObj, orderVal, filenamePrefix )
 # Adapt.@adapt_structure JacobianDevice
 
-gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
+# gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
 # fileVal = open( gmshFileName )
 # testMATVEC( fileVal, configObj, 2 )
 
@@ -621,12 +685,15 @@ gmshFileName = gmshFolderName * "regularMesh3D_lvl0.msh";
 # serialResults = profileSerialLinearSystemSolve( fileVal, configObj, serialLinearSystemBench )
 # close(fileVal)
 
-fileVal = open( gmshFileName )
-gpuLinearSystemBench = BenchmarkGroup()
-gpuResults = profileGPULinearSystemSolve( fileVal, configObj, gpuLinearSystemBench)
-close(fileVal)
+# fileVal = open( gmshFileName )
+# gpuLinearSystemBench = BenchmarkGroup()
+# gpuResults = profileGPULinearSystemSolve( fileVal, configObj, gpuLinearSystemBench)
+# close(fileVal)
 
+filenamePrefix = "GPU_LinearSystemPerformanceScaling_HexMesh3D_Order=" * string( orderVal ); 
+figname = "Plots/" * filenamePrefix * ".png"
+gpuLinearSystemSolveScaling( gmshFolderName, configObj, figname )
 # println(serialResults)
-println(gpuResults)
+# println(gpuResults)
 # matvecBench = BenchmarkGroup()
 # profileGPUMATVEC( fileVal, configObj, matvecBench )
